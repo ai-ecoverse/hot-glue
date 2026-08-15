@@ -167,6 +167,7 @@ function prelude(): Env {
   def('map', (f: unknown, xs: Node[]) => xs.map((x) => call(f, [x]) as Node));
   def('sym', (n: string) => sym(n));
   def('sym?', (x: Node) => x instanceof Sym);
+  def('sym-is?', (x: Node, n: string) => x instanceof Sym && x.name === n);
   def('list?', (x: Node) => Array.isArray(x));
   def('gensym', () => sym(`$g${gen++}`));
   def('=', (a: unknown, b: unknown) => a === b);
@@ -204,10 +205,13 @@ export function expand(forms: Node[]): Node[] {
       if (!fuel--) throw new Error(`divergent macro: ${print(n)}`);
       const m = 1n << mark++;
       const args = (flip(n, m) as Node[]).slice(1);
-      if (args.length !== mac.params.length)
-        throw new Error(`${head(n)}: expected ${mac.params.length} forms, got ${args.length}`);
+      const rest = mac.params.findIndex((p) => p.name === '&rest');
+      if (rest < 0 ? args.length !== mac.params.length : args.length < rest)
+        throw new Error(`${head(n)}: expected ${rest < 0 ? mac.params.length : `${rest}+`} forms, got ${args.length}`);
       const e = new Env(genv);
-      mac.params.forEach((p, i) => e.set(p, args[i]));
+      mac.params.forEach((p, i) => {
+        if (i !== rest) e.set(p, rest < 0 || i < rest ? args[i] : args.slice(rest));
+      });
       n = flip(
         mac.body.reduce<Node>((_, x) => meval(x, e) as Node, []),
         m,

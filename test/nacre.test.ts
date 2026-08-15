@@ -86,6 +86,13 @@ describe('nacre stage 0', () => {
     expect(wat).toContain('(call $f (i32.const 2))');
   });
 
+  it('&rest gathers trailing forms', () => {
+    const wat = wrap(`
+      (defmacro $seq (first &rest more) \`(block ,first ,@more))
+      (func ($seq (nop) (nop) (unreachable)))`);
+    expect(wat).toContain('(block (nop) (nop) (unreachable))');
+  });
+
   it('unhygienic opts out, loudly', () => {
     const wat = wrap(`
       (defmacro $capturing (body) \`(block (unhygienic $break) ,body))
