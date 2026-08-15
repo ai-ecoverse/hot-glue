@@ -586,7 +586,8 @@
   (func $branch? (param $c i32) (result i32)
     ($when (call $cis (local.get $c) "br") (return (i32.const 1)))
     ($when (call $cis (local.get $c) "br_if") (return (i32.const 1)))
-    (call $cis (local.get $c) "br_table"))
+    ($when (call $cis (local.get $c) "br_table") (return (i32.const 1)))
+    (call $cis (local.get $c) "br_on_cast"))
 
   (func $labeled? (param $c i32) (result i32)
     ($when (call $cis (local.get $c) "block") (return (i32.const 1)))

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nacre Playground</title>
+<style>
+  :root { --bg:#101418; --panel:#171d24; --ink:#d8dee6; --dim:#7b8794; --accent:#5fb3b3; --edge:#232b34; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 15px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; min-height: 100vh; padding: 1.25rem; }
+  header { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  h1 { font-size: 1.2rem; letter-spacing: .12em; }
+  h1 .pearl { color: var(--accent); }
+  header p { color: var(--dim); font-size: .8rem; }
+  .bar { display: flex; gap: .6rem; margin-bottom: 1rem; align-items: center; flex-wrap: wrap; }
+  select, button { background: var(--panel); color: var(--ink); border: 1px solid var(--edge); border-radius: 6px; padding: .45rem .8rem; font: inherit; font-size: .85rem; }
+  button { cursor: pointer; border-color: var(--accent); color: var(--accent); }
+  button:hover { background: var(--accent); color: var(--bg); }
+  .status { color: var(--dim); font-size: .8rem; }
+  .panes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .8rem; min-height: 70vh; }
+  @media (max-width: 960px) { .panes { grid-template-columns: 1fr; } }
+  .pane { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
+  .pane h2 { font-size: .7rem; letter-spacing: .15em; color: var(--dim); padding: .5rem .8rem; border-bottom: 1px solid var(--edge); font-weight: normal; text-transform: uppercase; }
+  textarea, pre { flex: 1; background: none; color: inherit; border: 0; padding: .8rem; font: inherit; font-size: .78rem; overflow: auto; white-space: pre; resize: none; outline: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>nacre <span class="pearl">⌾</span> playground</h1>
+  <p>everything runs in this tab — the expander and the assembler below are WebAssembly modules that built each other</p>
+</header>
+<div class="bar">
+  <select id="example"><option>fizzbuzz</option><option>gc-ast</option></select>
+  <button id="run">expand · assemble · run</button>
+  <span class="status" id="status"></span>
+</div>
+<div class="panes">
+  <div class="pane"><h2>nacre source</h2><textarea id="src" spellcheck="false"></textarea></div>
+  <div class="pane"><h2>expanded wat</h2><pre id="wat"></pre></div>
+  <div class="pane"><h2>output</h2><pre id="out"></pre></div>
+</div>
+<script>
+const EXPAND_B64 = "__EXPAND_B64__";
+const AS_B64 = "__AS_B64__";
+const EXAMPLES = { "fizzbuzz": __FIZZBUZZ__, "gc-ast": __GC_AST__ };
+
+const $ = (id) => document.getElementById(id);
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const enc = new TextEncoder(), dec = new TextDecoder();
+
+let expandMod, asMod;
+
+async function runWasi(mod, stdin) {
+  const outs = [];
+  let pos = 0, inst;
+  const dv = () => new DataView(inst.exports.memory.buffer);
+  const u8 = () => new Uint8Array(inst.exports.memory.buffer);
+  inst = await WebAssembly.instantiate(mod, {
+    wasi_snapshot_preview1: {
+      fd_read(fd, iovs, cnt, pn) {
+        const base = dv().getUint32(iovs, true), len = dv().getUint32(iovs + 4, true);
+        const n = Math.min(len, stdin.length - pos);
+        u8().set(stdin.subarray(pos, pos + n), base);
+        pos += n;
+        dv().setUint32(pn, n, true);
+        return 0;
+      },
+      fd_write(fd, iovs, cnt, pn) {
+        const base = dv().getUint32(iovs, true), len = dv().getUint32(iovs + 4, true);
+        outs.push(u8().slice(base, base + len));
+        dv().setUint32(pn, len, true);
+        return 0;
+      },
+    },
+  });
+  inst.exports._start();
+  const r = new Uint8Array(outs.reduce((a, b) => a + b.length, 0));
+  let o = 0;
+  for (const b of outs) { r.set(b, o); o += b.length; }
+  return r;
+}
+
+async function run() {
+  const status = $("status");
+  try {
+    status.textContent = "expanding…";
+    expandMod ??= await WebAssembly.compile(b64(EXPAND_B64));
+    asMod ??= await WebAssembly.compile(b64(AS_B64));
+    const wat = await runWasi(expandMod, enc.encode($("src").value));
+    $("wat").textContent = dec.decode(wat);
+    status.textContent = "assembling…";
+    const bin = await runWasi(asMod, wat);
+    status.textContent = "running…";
+    const mod = await WebAssembly.compile(bin);
+    if (WebAssembly.Module.exports(mod).some((e) => e.name === "_start")) {
+      $("out").textContent = dec.decode(await runWasi(mod, new Uint8Array(0)));
+    } else {
+      const inst = await WebAssembly.instantiate(mod, {});
+      const lines = [];
+      for (const [name, fn] of Object.entries(inst.exports))
+        if (typeof fn === "function") lines.push(name + "() = " + fn());
+      $("out").textContent = lines.join("\n");
+    }
+    status.textContent = bin.length + " bytes of wasm, assembled right here";
+  } catch (e) {
+    status.textContent = "";
+    $("out").textContent = String(e);
+  }
+}
+
+$("example").onchange = () => {
+  $("src").value = EXAMPLES[$("example").value];
+  $("wat").textContent = "";
+  $("out").textContent = "";
+};
+$("run").onclick = run;
+$("src").value = EXAMPLES["fizzbuzz"];
+</script>
+</body>
+</html>

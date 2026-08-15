@@ -42,6 +42,11 @@ describe.skipIf(!runtime)('expand.nacre — the expander', () => {
     expect(pipe(expandWat, source).toString()).toBe(compile(source));
   });
 
+  it('matches stage 0 on the GC module, byte for byte', () => {
+    const source = readFileSync('examples/gc-ast.nacre', 'utf8');
+    expect(pipe(expandWat, source).toString()).toBe(compile(source));
+  });
+
   it('expands its own source to the text it is running as', () => {
     const source = src('src/nacre/prelude.nacre', 'src/nacre/expand.nacre');
     expect(pipe(expandWat, source).toString()).toBe(readFileSync(expandWat, 'utf8'));

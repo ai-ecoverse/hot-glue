@@ -58,6 +58,16 @@ describe.skipIf(!runtime)('as.nacre — the assembler', () => {
     expect(got).toBe(want);
   });
 
+  it('assembles the GC AST — rec groups, casts, and all', () => {
+    const wat = compile(readFileSync('examples/gc-ast.nacre', 'utf8'));
+    const f = join(dir, 'gc.wasm');
+    writeFileSync(f, assemble(asWat, wat));
+    const got = execFileSync(runtime!, ['run', '-W', 'gc,function-references', '--invoke', 'demo', f], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    expect(got.toString().trim()).toBe('15');
+  });
+
   it('self-hosts: assembles itself to a fixpoint', () => {
     const text = readFileSync(asWat, 'utf8');
     const child = assemble(asWat, text); // wasmtime-parsed assembler assembles its own source

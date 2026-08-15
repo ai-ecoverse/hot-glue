@@ -243,7 +243,7 @@ export function expand(forms: Node[]): Node[] {
 
 const SIG = new Set(['export', 'import', 'type', 'param', 'result']);
 const LABELED = new Set(['block', 'loop', 'if']);
-const BRANCH = new Set(['br', 'br_if', 'br_table']);
+const BRANCH = new Set(['br', 'br_if', 'br_table', 'br_on_cast']);
 const VARREF = new Set(['local.get', 'local.set', 'local.tee']);
 
 export function lower(mod: Node[]): Node[] {

@@ -1,0 +1,51 @@
+;; gc-ast.nacre — the § 2 node algebra of docs/wasm-macros.md, in earnest.
+;;
+;; The GC AST that the design document sketched: an abstract $node with
+;; a location field, subtypes for numbers, pairs, and nil, pattern
+;; matching by br_on_cast. The macros build GC literals at expansion
+;; time — ($qlist 1 2 3 4 5) becomes a chain of struct.new forms.
+;;
+;;   npx tsx src/nacre/cli.ts examples/gc-ast.nacre > gc.wat
+;;   wasmtime run -W gc,function-references --invoke demo gc.wat   ;; 15
+
+(module
+  (rec
+    (type $node (sub (struct (field i32))))
+    (type $num (sub final $node (struct (field i32) (field i32))))
+    (type $pair (sub final $node (struct (field i32) (field (ref $node)) (field (ref $node)))))
+    (type $nil (sub final $node (struct (field i32)))))
+  (type $t0 (func (result i32)))
+  (type $t1 (func (param (ref $node)) (result i32)))
+
+  (defmacro $qnum (n)
+    `(struct.new $num (i32.const 0) (i32.const ,n)))
+
+  (defmacro $qlist (&rest items)
+    (if (= (length items) 0)
+        `(struct.new $nil (i32.const 0))
+        `(struct.new $pair (i32.const 0)
+           ($qnum ,(first items))
+           ($qlist ,@(rest items)))))
+
+  (func $sum (type $t1) (param $n (ref $node)) (result i32)
+    (local $acc i32)
+    (local $cur (ref null $node))
+    (local $p (ref null $pair))
+    (local.set $cur (local.get $n))
+    (block $done
+      (loop $walk
+        (local.set $p
+          (block $paircase (result (ref $pair))
+            (br_on_cast $paircase (ref $node) (ref $pair)
+              (ref.as_non_null (local.get $cur)))
+            (drop)
+            (br $done)))
+        (local.set $acc
+          (i32.add (local.get $acc)
+            (struct.get $num 1 (ref.cast (ref $num) (struct.get $pair 1 (local.get $p))))))
+        (local.set $cur (struct.get $pair 2 (local.get $p)))
+        (br $walk)))
+    (local.get $acc))
+
+  (func (export "demo") (type $t0) (result i32)
+    (call $sum ($qlist 1 2 3 4 5))))
