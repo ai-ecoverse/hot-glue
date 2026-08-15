@@ -58,6 +58,14 @@ export function read(src: string): Node[] {
       return xs;
     }
     if (c === ')') die('stray )');
+    if (c === '[') {
+      i++;
+      const xs: Node[] = [];
+      while ((skip(), src[i] !== ']')) xs.push(form());
+      i++;
+      return xs;
+    }
+    if (c === ']') die('stray ]');
     if (c === '`') return i++, [sym('quasiquote'), form()];
     if (c === ',') return i++, src[i] === '@' ? (i++, [sym('unquote-splicing'), form()]) : [sym('unquote'), form()];
     if (c === "'") return i++, [sym('quote'), form()];
@@ -77,7 +85,8 @@ export function read(src: string): Node[] {
       return s;
     }
     let j = i;
-    while (j < src.length && !/[\s();"'`,]/.test(src[j])) j++;
+    while (j < src.length && !/[\s();"'`,[\]]/.test(src[j])) j++;
+    if (j === i) die(`unexpected ${src[i]}`);
     const t = src.slice(i, j);
     i = j;
     const n = Number(t);

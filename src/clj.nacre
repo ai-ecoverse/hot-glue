@@ -1,0 +1,195 @@
+;; clj.nacre — a Clojure accent for the WebAssembly macro assembler.
+;;
+;;   npx tsx src/nacre/cli.ts src/nacre/clj.nacre your.nacre
+;;
+;; Brackets read as parentheses, so bindings look like home. Bare
+;; numbers in these macros wrap themselves in i32.const. Locals are
+;; still locals: (local.get $x) is the price of the metal. Two names
+;; are dollar-spelled on principle — a macro may not wear the name of
+;; a core form it must emit, so the value-if is $if and loop is $loop.
+;; recur is recur, and it finds the nearest $loop, as it should.
+;; All arithmetic is signed i32, which is what Clojure's ints wish
+;; they were allowed to admit.
+
+(defmacro comment (&rest ignored)
+  `(splice))
+
+;; wrap bare numbers; instructions and symbols pass through
+(defmacro num (x)
+  (if (list? x) x (if (sym? x) x `(i32.const ,x))))
+
+(defmacro $if (test then- else-)
+  `(if (result i32) (num ,test) (then (num ,then-)) (else (num ,else-))))
+
+(defmacro when (test &rest body)
+  `(if (num ,test) (then ,@body)))
+
+(defmacro when-not (test &rest body)
+  `(if (i32.eqz (num ,test)) (then ,@body)))
+
+;; flat Clojure bindings: (let [$x 1 $y (+ $x 2)] body)
+(defmacro let (bindings &rest body)
+  (if (= (length bindings) 0)
+      `(splice ,@body)
+      `(splice
+         (local ,(first bindings) i32)
+         (local.set ,(first bindings) (num ,(second bindings)))
+         (let ,(rest (rest bindings)) ,@body))))
+
+;; flat pairs with :else, value-producing
+(defmacro cond (&rest clauses)
+  (if (= (length clauses) 0)
+      `(unreachable)
+      (if (sym-is? (first clauses) ":else")
+          `(num ,(second clauses))
+          `(if (result i32) (num ,(first clauses))
+             (then (num ,(second clauses)))
+             (else (cond ,@(rest (rest clauses))))))))
+
+(defmacro while (test &rest body)
+  `(block $break
+     (loop $continue
+       (br_if $break (i32.eqz (num ,test)))
+       ,@body
+       (br $continue))))
+
+(defmacro dotimes (binding &rest body)
+  `(splice
+     (local ,(first binding) i32)
+     (local $limit i32)
+     (local.set ,(first binding) (i32.const 0))
+     (local.set $limit (num ,(second binding)))
+     (while (i32.lt_s (local.get ,(first binding)) (local.get $limit))
+       ,@body
+       (local.set ,(first binding) (inc (local.get ,(first binding)))))))
+
+;; ($loop [$x init $y init] body) with (recur e1 e2): Clojure's loop.
+;; recur and the loop head meet at unhygienic transfer registers
+;; $recur.0, $recur.1, ... and the unhygienic label $recur-point, so
+;; nested loops nest and recur binds to the nearest one. One to three
+;; loop variables; the loop is an expression and must end in a value.
+(defmacro $loop (bindings &rest body)
+  (if (= (length bindings) 2)
+      `(splice
+         (local (unhygienic $recur.0) i32)
+         (local.set (unhygienic $recur.0) (num ,(second bindings)))
+         (loop (unhygienic $recur-point) (result i32)
+           (local ,(first bindings) i32)
+           (local.set ,(first bindings) (local.get (unhygienic $recur.0)))
+           ,@body))
+      (if (= (length bindings) 4)
+          `(splice
+             (local (unhygienic $recur.0) i32)
+             (local (unhygienic $recur.1) i32)
+             (local.set (unhygienic $recur.0) (num ,(second bindings)))
+             (local.set (unhygienic $recur.1) (num ,(second (rest (rest bindings)))))
+             (loop (unhygienic $recur-point) (result i32)
+               (local ,(first bindings) i32)
+               (local ,(first (rest (rest bindings))) i32)
+               (local.set ,(first bindings) (local.get (unhygienic $recur.0)))
+               (local.set ,(first (rest (rest bindings))) (local.get (unhygienic $recur.1)))
+               ,@body))
+          `(splice
+             (local (unhygienic $recur.0) i32)
+             (local (unhygienic $recur.1) i32)
+             (local (unhygienic $recur.2) i32)
+             (local.set (unhygienic $recur.0) (num ,(second bindings)))
+             (local.set (unhygienic $recur.1) (num ,(second (rest (rest bindings)))))
+             (local.set (unhygienic $recur.2) (num ,(second (rest (rest (rest (rest bindings)))))))
+             (loop (unhygienic $recur-point) (result i32)
+               (local ,(first bindings) i32)
+               (local ,(first (rest (rest bindings))) i32)
+               (local ,(first (rest (rest (rest (rest bindings))))) i32)
+               (local.set ,(first bindings) (local.get (unhygienic $recur.0)))
+               (local.set ,(first (rest (rest bindings))) (local.get (unhygienic $recur.1)))
+               (local.set ,(first (rest (rest (rest (rest bindings))))) (local.get (unhygienic $recur.2)))
+               ,@body)))))
+
+(defmacro recur (&rest args)
+  (if (= (length args) 1)
+      `(splice
+         (local.set (unhygienic $recur.0) (num ,(first args)))
+         (br (unhygienic $recur-point)))
+      (if (= (length args) 2)
+          `(splice
+             (local.set (unhygienic $recur.0) (num ,(first args)))
+             (local.set (unhygienic $recur.1) (num ,(second args)))
+             (br (unhygienic $recur-point)))
+          `(splice
+             (local.set (unhygienic $recur.0) (num ,(first args)))
+             (local.set (unhygienic $recur.1) (num ,(second args)))
+             (local.set (unhygienic $recur.2) (num ,(second (rest args))))
+             (br (unhygienic $recur-point))))))
+
+;; threading
+(defmacro -> (x &rest forms)
+  (if (= (length forms) 0)
+      `(num ,x)
+      (if (list? (first forms))
+          `(-> (,(first (first forms)) (num ,x) ,@(rest (first forms))) ,@(rest forms))
+          `(-> (,(first forms) (num ,x)) ,@(rest forms)))))
+
+(defmacro ->> (x &rest forms)
+  (if (= (length forms) 0)
+      `(num ,x)
+      (if (list? (first forms))
+          `(->> (,(first (first forms)) ,@(rest (first forms)) (num ,x)) ,@(rest forms))
+          `(->> (,(first forms) (num ,x)) ,@(rest forms)))))
+
+;; arithmetic, variadic and left-folded
+(defmacro + (&rest xs)
+  (if (= (length xs) 1)
+      `(num ,(first xs))
+      `(+ (i32.add (num ,(first xs)) (num ,(second xs))) ,@(rest (rest xs)))))
+
+(defmacro * (&rest xs)
+  (if (= (length xs) 1)
+      `(num ,(first xs))
+      `(* (i32.mul (num ,(first xs)) (num ,(second xs))) ,@(rest (rest xs)))))
+
+(defmacro - (&rest xs)
+  (if (= (length xs) 1)
+      `(i32.sub (i32.const 0) (num ,(first xs)))
+      (if (= (length xs) 2)
+          `(i32.sub (num ,(first xs)) (num ,(second xs)))
+          `(- (i32.sub (num ,(first xs)) (num ,(second xs))) ,@(rest (rest xs))))))
+
+(defmacro quot (a b) `(i32.div_s (num ,a) (num ,b)))
+(defmacro rem (a b) `(i32.rem_s (num ,a) (num ,b)))
+(defmacro inc (x) `(i32.add (num ,x) (i32.const 1)))
+(defmacro dec (x) `(i32.sub (num ,x) (i32.const 1)))
+
+;; predicates and comparisons, signed
+(defmacro = (a b) `(i32.eq (num ,a) (num ,b)))
+(defmacro not= (a b) `(i32.ne (num ,a) (num ,b)))
+(defmacro < (a b) `(i32.lt_s (num ,a) (num ,b)))
+(defmacro > (a b) `(i32.gt_s (num ,a) (num ,b)))
+(defmacro <= (a b) `(i32.le_s (num ,a) (num ,b)))
+(defmacro >= (a b) `(i32.ge_s (num ,a) (num ,b)))
+(defmacro zero? (x) `(i32.eqz (num ,x)))
+(defmacro pos? (x) `(i32.gt_s (num ,x) (i32.const 0)))
+(defmacro neg? (x) `(i32.lt_s (num ,x) (i32.const 0)))
+(defmacro not (x) `(i32.eqz (num ,x)))
+
+;; short-circuit, variadic
+(defmacro and (&rest xs)
+  (if (= (length xs) 1)
+      `(num ,(first xs))
+      `(if (result i32) (num ,(first xs))
+         (then (and ,@(rest xs)))
+         (else (i32.const 0)))))
+
+(defmacro or (&rest xs)
+  (if (= (length xs) 1)
+      `(num ,(first xs))
+      `(if (result i32) (num ,(first xs))
+         (then (i32.const 1))
+         (else (or ,@(rest xs))))))
+
+;; bits
+(defmacro bit-and (a b) `(i32.and (num ,a) (num ,b)))
+(defmacro bit-or (a b) `(i32.or (num ,a) (num ,b)))
+(defmacro bit-xor (a b) `(i32.xor (num ,a) (num ,b)))
+(defmacro bit-shift-left (a b) `(i32.shl (num ,a) (num ,b)))
+(defmacro bit-shift-right (a b) `(i32.shr_s (num ,a) (num ,b)))
+(defmacro unsigned-bit-shift-right (a b) `(i32.shr_u (num ,a) (num ,b)))

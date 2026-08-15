@@ -30,7 +30,7 @@
   <p>everything runs in this tab — the expander and the assembler below are WebAssembly modules that built each other</p>
 </header>
 <div class="bar">
-  <select id="example"><option>fizzbuzz</option><option>gc-ast</option></select>
+  <select id="example"><option>fizzbuzz</option><option>gc-ast</option><option>clojure</option></select>
   <button id="run">expand · assemble · run</button>
   <span class="status" id="status"></span>
 </div>
@@ -42,7 +42,7 @@
 <script>
 const EXPAND_B64 = "__EXPAND_B64__";
 const AS_B64 = "__AS_B64__";
-const EXAMPLES = { "fizzbuzz": __FIZZBUZZ__, "gc-ast": __GC_AST__ };
+const EXAMPLES = { "fizzbuzz": __FIZZBUZZ__, "gc-ast": __GC_AST__, "clojure": __CLJ__ };
 
 const $ = (id) => document.getElementById(id);
 const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));

@@ -14,11 +14,21 @@
        ,@body
        (br $continue))))
 
-;; i32 bindings. Declarations hoist; initialization happens here.
+;; Bindings. Two elements make an i32; a third slips a type between
+;; name and value: (($n (ref $node) expr)). Declarations hoist;
+;; initialization happens here.
 (defmacro $let (bindings &rest body)
   `(splice
-     ,@(map (lambda (b) `(local ,(first b) i32)) bindings)
-     ,@(map (lambda (b) `(local.set ,(first b) ,(second b))) bindings)
+     ,@(map (lambda (b)
+              (if (= (length b) 3)
+                  `(local ,(first b) ,(second b))
+                  `(local ,(first b) i32)))
+            bindings)
+     ,@(map (lambda (b)
+              (if (= (length b) 3)
+                  `(local.set ,(first b) ,(second (rest b)))
+                  `(local.set ,(first b) ,(second b))))
+            bindings)
      ,@body))
 
 ;; Expression cond. Every clause yields i32; else is optional but wise.

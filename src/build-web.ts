@@ -23,6 +23,7 @@ export function buildPage(root = '.'): string {
   page = fill(page, '__AS_B64__', b64(lower(compile(read('src/nacre/prelude.nacre', 'src/nacre/as.nacre')))));
   page = fill(page, '__FIZZBUZZ__', JSON.stringify(read('examples/fizzbuzz.nacre')));
   page = fill(page, '__GC_AST__', JSON.stringify(read('examples/gc-ast.nacre')));
+  page = fill(page, '__CLJ__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/collatz.nacre')));
   const out = p('web', 'playground.html');
   writeFileSync(out, page);
   return out;

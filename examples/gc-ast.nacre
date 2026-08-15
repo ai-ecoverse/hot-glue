@@ -48,4 +48,19 @@
     (local.get $acc))
 
   (func (export "demo") (type $t0) (result i32)
-    (call $sum ($qlist 1 2 3 4 5))))
+    (call $sum ($qlist 1 2 3 4 5)))
+
+  ;; arrays and i31: a byte array summed by index, plus a boxed scalar
+  (type $bytes (array (mut i8)))
+  (func (export "demo2") (type $t0) (result i32)
+    (local $a (ref null $bytes))
+    (local $i i32)
+    (local $s i32)
+    (local.set $a (array.new_fixed $bytes 3 (i32.const 7) (i32.const 8) (i32.const 9)))
+    (block $done
+      (loop $go
+        (br_if $done (i32.ge_u (local.get $i) (array.len (local.get $a))))
+        (local.set $s (i32.add (local.get $s) (array.get_u $bytes (local.get $a) (local.get $i))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $go)))
+    (i32.add (local.get $s) (i31.get_s (ref.i31 (i32.const 100))))))
