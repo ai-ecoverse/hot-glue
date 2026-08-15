@@ -280,7 +280,7 @@ With `$divisible?`, `$print-if`, `AND` as macros and inline strings as § 6.2 su
 
 ## 9. Bootstrap and next steps
 
-1. **Stage 0** – reader, expander, lowerer in TypeScript. Allegorithm's parser already produces the exact node algebra of § 2 (number, string, symbol, list, each with line and col – `src/parser/ast.ts`); the stage-0 expander can grow beside it and lend `defmacro` back to the host language, which currently has special forms and no macros. Deliverables: §§ 4–6 behaviors, the examples as golden tests (source → expansion → `wasm-tools validate`).
+1. **Stage 0** – reader, expander, lowerer in TypeScript. *Implemented:* `src/nacre/nacre.ts`, one file – marks in a bigint bitset so the hygiene flip is one XOR, `defmacro` with quasiquote over a minimal meta-Lisp, the hoisting protocol for locals, inline strings pooled into data segments, printed names as debug output exactly as § 5 prescribes. `examples/fizzbuzz.nacre` expands through three macro layers into WAT that wasmtime runs; `test/nacre/` holds the golden tests, label- and local-capture cases included. Stage 0 owns its shortcuts in its header comment: macro names resolve by name alone, quasiquote does not nest, no locations yet. The stage-0 expander can also lend `defmacro` back to the host language, which has special forms and no macros.
 2. **Stage 1** – the same expander, compiled to Wasm, GC AST as specified, meta-Lisp interpreted. Acceptance: it expands its own source, and stage 0 and stage 1 produce bit-identical output on the golden suite.
 3. **Stage 2** – compile the meta-Lisp to `$macro-fn` functions; Binaryen IR as an alternate lowering; the browser as an expansion host, because a sandboxed expander that will not run in a `<script>` tag is leaving its best argument unused.
 
