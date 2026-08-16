@@ -13,7 +13,7 @@
   h1 .pearl { color: var(--accent); }
   header p { color: var(--dim); font-size: .8rem; }
   .bar { display: flex; gap: .6rem; margin-bottom: 1rem; align-items: center; flex-wrap: wrap; }
-  select, button { background: var(--panel); color: var(--ink); border: 1px solid var(--edge); border-radius: 6px; padding: .45rem .8rem; font: inherit; font-size: .85rem; }
+  select, button, input { background: var(--panel); color: var(--ink); border: 1px solid var(--edge); border-radius: 6px; padding: .45rem .8rem; font: inherit; font-size: .85rem; }
   button { cursor: pointer; border-color: var(--accent); color: var(--accent); }
   button:hover { background: var(--accent); color: var(--bg); }
   .status { color: var(--dim); font-size: .8rem; }
@@ -32,7 +32,8 @@
   <p>everything runs in this tab — the expander and the assembler are WebAssembly modules that built each other; the C and Rust guests were compiled from the wilderness</p>
 </header>
 <div class="bar">
-  <select id="example"><option>fizzbuzz</option><option>gc-ast</option><option>clojure</option><option>interop</option><option>mandelbrot</option><option>mandelzoom</option><option>deepzoom</option></select>
+  <select id="example"><option>fizzbuzz</option><option>gc-ast</option><option>clojure</option><option>interop</option><option>mandelbrot</option><option>mandelzoom</option><option>deepzoom</option><option>gpt</option></select>
+  <input id="prompt" hidden value="The pearl" spellcheck="false">
   <button id="run">expand · assemble · run</button>
   <button id="transcode" hidden>transcode in tab (ffmpeg.wasm, fetches ~31MB)</button>
   <span class="status" id="status"></span>
@@ -55,13 +56,43 @@ const EXAMPLES = {
   "mandelbrot": __MANDELBROT__,
   "mandelzoom": __MANDELZOOM__,
   "deepzoom": __DEEPZOOM__,
+  "gpt": __GPT__,
 };
+const OYSTER_GZ_B64 = "__OYSTER_GZ_B64__";
 
 const $ = (id) => document.getElementById(id);
 const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const enc = new TextEncoder(), dec = new TextDecoder();
 
-let expandMod, asMod, nativeNs, lastMod, lastY4M;
+let expandMod, asMod, nativeNs, lastMod, lastY4M, oysterNpt;
+
+// the oyster's weights, inflated once — a byte-GPT that read this repo's prose
+async function oyster() {
+  if (!OYSTER_GZ_B64) throw new Error("no weights embedded — run scripts/train-oyster.py, then build:web");
+  if (!oysterNpt) {
+    const ds = new DecompressionStream("gzip");
+    oysterNpt = new Uint8Array(
+      await new Response(new Blob([b64(OYSTER_GZ_B64)]).stream().pipeThrough(ds)).arrayBuffer());
+  }
+  return oysterNpt;
+}
+
+// stdin for the gpt example: [weights][u32 plen][prompt][u32 gen][f32 temp][u32 seed]
+async function gptStdin() {
+  const w = await oyster();
+  const p = enc.encode($("prompt").value || "The pearl");
+  const tail = new Uint8Array(4 + p.length + 12);
+  const dv = new DataView(tail.buffer);
+  dv.setUint32(0, p.length, true);
+  tail.set(p, 4);
+  dv.setUint32(4 + p.length, 160, true);
+  dv.setFloat32(8 + p.length, 0.8, true);
+  dv.setUint32(12 + p.length, (Math.random() * 4294967296) >>> 0, true);
+  const blob = new Uint8Array(w.length + tail.length);
+  blob.set(w, 0);
+  blob.set(tail, w.length);
+  return blob;
+}
 
 async function natives() {
   if (nativeNs) return nativeNs;
@@ -123,7 +154,9 @@ async function run() {
     $("wat").textContent = dec.decode(wat);
     status.textContent = "assembling…";
     const bin = (await wasiInstance(asMod, wat)).run();
-    status.textContent = "running…";
+    const isGpt = $("example").value === "gpt";
+    status.textContent = isGpt ? "the oyster is thinking…" : "running…";
+    const input = isGpt ? await gptStdin() : new Uint8Array(0);
     const mod = await WebAssembly.compile(bin);
     const names = WebAssembly.Module.exports(mod).map((e) => e.name);
     if (names.includes("render") && names.includes("width")) {
@@ -149,11 +182,13 @@ async function run() {
         $("transcode").hidden = false;
       }
     } else if (names.includes("_start")) {
-      const bytes = (await wasiInstance(mod, new Uint8Array(0))).run();
+      const bytes = (await wasiInstance(mod, input)).run();
       if (bytes.length > 9 && dec.decode(bytes.subarray(0, 9)) === "YUV4MPEG2") {
         lastY4M = bytes;
         $("out").textContent = "a YUV4MPEG2 stream, " + bytes.length + " bytes — this module is a video source";
         $("transcode").hidden = false;
+      } else if (isGpt) {
+        $("out").textContent = $("prompt").value + dec.decode(bytes);
       } else {
         $("out").textContent = dec.decode(bytes);
       }
@@ -217,6 +252,7 @@ $("example").onchange = () => {
   $("canvas").hidden = true;
   $("video").hidden = true;
   $("transcode").hidden = true;
+  $("prompt").hidden = $("example").value !== "gpt";
 };
 $("run").onclick = run;
 $("src").value = EXAMPLES["fizzbuzz"];

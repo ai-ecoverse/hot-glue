@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { existsSync } from 'node:fs';
 import { chromium, type Browser } from 'playwright-core';
 import { buildPage } from '../../src/nacre/build-web.js';
 
@@ -74,6 +75,17 @@ describe('the browser as expansion host', () => {
         await page.waitForFunction("!document.getElementById('transcode').hidden", undefined, {
           timeout: 10000,
         });
+        // the resident language model speaks, entirely inside the tab
+        if (existsSync('examples/oyster.npt')) {
+          await page.selectOption('#example', 'gpt');
+          await page.fill('#prompt', 'The pearl');
+          await page.click('#run');
+          await page.waitForFunction(
+            "document.getElementById('out').textContent.startsWith('The pearl') && document.getElementById('out').textContent.length > 40",
+            undefined,
+            { timeout: 120000 },
+          );
+        }
       } finally {
         await browser.close();
       }

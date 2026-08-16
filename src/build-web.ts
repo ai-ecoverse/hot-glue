@@ -9,6 +9,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { compile } from './nacre.js';
 import { lower } from './binaryen-lower.js';
 
@@ -37,6 +38,15 @@ export function buildPage(root = '.'): string {
   page = fill(page, '__MANDELBROT__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/mandelbrot.nacre')));
   page = fill(page, '__MANDELZOOM__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/mandelzoom.nacre')));
   page = fill(page, '__DEEPZOOM__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/deepzoom.nacre')));
+  page = fill(page, '__GPT__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/gpt.nacre')));
+  // the oyster's weights ride along gzipped; the tab inflates them itself
+  let oyster = '';
+  try {
+    oyster = b64(gzipSync(readFileSync(p('examples', 'oyster.npt')), { level: 9 }));
+  } catch {
+    /* no weights trained yet — the gpt example will say so */
+  }
+  page = fill(page, '__OYSTER_GZ_B64__', oyster);
   const out = p('web', 'playground.html');
   writeFileSync(out, page);
   return out;
