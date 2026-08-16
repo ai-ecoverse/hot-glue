@@ -65,6 +65,15 @@ describe('the browser as expansion host', () => {
         })()`);
         expect(pixels.slice(0, 3)).toEqual([0, 0, 0]); // the center is in the set
         expect(pixels[3]).toBeGreaterThan(0); // the corner escapes
+        // mandelzoom: a canvas still, plus the offer to become a film
+        await page.selectOption('#example', 'mandelzoom');
+        await page.click('#run');
+        await page.waitForFunction("!document.getElementById('canvas').hidden", undefined, {
+          timeout: 120000,
+        });
+        await page.waitForFunction("!document.getElementById('transcode').hidden", undefined, {
+          timeout: 10000,
+        });
       } finally {
         await browser.close();
       }

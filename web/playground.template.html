@@ -23,6 +23,7 @@
   .pane h2 { font-size: .7rem; letter-spacing: .15em; color: var(--dim); padding: .5rem .8rem; border-bottom: 1px solid var(--edge); font-weight: normal; text-transform: uppercase; }
   textarea, pre { flex: 1; background: none; color: inherit; border: 0; padding: .8rem; font: inherit; font-size: .78rem; overflow: auto; white-space: pre; resize: none; outline: none; }
   #canvas { margin: .8rem; image-rendering: pixelated; max-width: calc(100% - 1.6rem); border-radius: 4px; }
+  #video { margin: .8rem; max-width: calc(100% - 1.6rem); border-radius: 4px; }
 </style>
 </head>
 <body>
@@ -33,12 +34,13 @@
 <div class="bar">
   <select id="example"><option>fizzbuzz</option><option>gc-ast</option><option>clojure</option><option>interop</option><option>mandelbrot</option><option>mandelzoom</option><option>deepzoom</option></select>
   <button id="run">expand · assemble · run</button>
+  <button id="transcode" hidden>transcode in tab (ffmpeg.wasm, fetches ~31MB)</button>
   <span class="status" id="status"></span>
 </div>
 <div class="panes">
   <div class="pane"><h2>nacre source</h2><textarea id="src" spellcheck="false"></textarea></div>
   <div class="pane"><h2>expanded wat</h2><pre id="wat"></pre></div>
-  <div class="pane"><h2>output</h2><pre id="out"></pre><canvas id="canvas" hidden></canvas></div>
+  <div class="pane"><h2>output</h2><pre id="out"></pre><canvas id="canvas" hidden></canvas><video id="video" controls loop hidden></video></div>
 </div>
 <script>
 const EXPAND_B64 = "__EXPAND_B64__";
@@ -59,7 +61,7 @@ const $ = (id) => document.getElementById(id);
 const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const enc = new TextEncoder(), dec = new TextDecoder();
 
-let expandMod, asMod, nativeNs;
+let expandMod, asMod, nativeNs, lastMod, lastY4M;
 
 async function natives() {
   if (nativeNs) return nativeNs;
@@ -110,6 +112,9 @@ async function run() {
   const status = $("status");
   const canvas = $("canvas");
   canvas.hidden = true;
+  $("video").hidden = true;
+  $("transcode").hidden = true;
+  lastMod = lastY4M = undefined;
   try {
     status.textContent = "expanding…";
     expandMod ??= await WebAssembly.compile(b64(EXPAND_B64));
@@ -139,8 +144,19 @@ async function run() {
       }
       ctx.putImageData(img, 0, 0);
       $("out").textContent = "rendered " + w + "×" + h + " into this tab's own canvas";
+      if (names.includes("_start")) {
+        lastMod = mod;
+        $("transcode").hidden = false;
+      }
     } else if (names.includes("_start")) {
-      $("out").textContent = dec.decode((await wasiInstance(mod, new Uint8Array(0))).run());
+      const bytes = (await wasiInstance(mod, new Uint8Array(0))).run();
+      if (bytes.length > 9 && dec.decode(bytes.subarray(0, 9)) === "YUV4MPEG2") {
+        lastY4M = bytes;
+        $("out").textContent = "a YUV4MPEG2 stream, " + bytes.length + " bytes — this module is a video source";
+        $("transcode").hidden = false;
+      } else {
+        $("out").textContent = dec.decode(bytes);
+      }
     } else {
       const { inst } = await wasiInstance(mod, new Uint8Array(0));
       const lines = [];
@@ -155,11 +171,52 @@ async function run() {
   }
 }
 
+// The whole pipeline stays in the tab: the y4m the Lisp emitted goes
+// through ffmpeg compiled to WebAssembly, fetched on demand.
+$("transcode").onclick = async () => {
+  const status = $("status");
+  try {
+    if (!window.FFmpeg) {
+      status.textContent = "fetching ffmpeg.wasm from unpkg…";
+      await new Promise((ok, err) => {
+        const s = document.createElement("script");
+        s.src = "https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js";
+        s.onload = ok;
+        s.onerror = () => err(new Error("could not fetch ffmpeg.wasm — offline?"));
+        document.head.appendChild(s);
+      });
+    }
+    window.__ff ??= window.FFmpeg.createFFmpeg({
+      log: false,
+      corePath: "https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js",
+    });
+    const ff = window.__ff;
+    if (!ff.isLoaded()) await ff.load();
+    if (!lastY4M) {
+      status.textContent = "rendering the stream in this tab…";
+      lastY4M = (await wasiInstance(lastMod, new Uint8Array(0))).run();
+    }
+    ff.FS("writeFile", "in.y4m", lastY4M);
+    status.textContent = "transcoding in this tab…";
+    await ff.run("-i", "in.y4m", "-frames:v", "90", "-pix_fmt", "yuv420p", "out.mp4");
+    const mp4 = ff.FS("readFile", "out.mp4");
+    const v = $("video");
+    v.src = URL.createObjectURL(new Blob([mp4.buffer], { type: "video/mp4" }));
+    v.hidden = false;
+    v.play();
+    status.textContent = mp4.length + " bytes of mp4 — rendered, assembled, and encoded without leaving this tab";
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
 $("example").onchange = () => {
   $("src").value = EXAMPLES[$("example").value];
   $("wat").textContent = "";
   $("out").textContent = "";
   $("canvas").hidden = true;
+  $("video").hidden = true;
+  $("transcode").hidden = true;
 };
 $("run").onclick = run;
 $("src").value = EXAMPLES["fizzbuzz"];
