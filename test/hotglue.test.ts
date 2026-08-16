@@ -32,6 +32,29 @@ describe('hot melt adhesive', () => {
     expect(steps).toContain('cut');
   });
 
+  it('the film is self-contained: every wasm verb declares its sources', () => {
+    const forms = read(readFileSync('examples/film.hma', 'utf8'));
+    const film = forms.find((f) => Array.isArray(f) && f[0] instanceof Sym && f[0].name === 'film') as unknown[][];
+    const body = film.slice(2) as Sym[][];
+    const declared = new Set(
+      body.filter((s) => s[0].name === 'filter').map((s) => s[1].name),
+    );
+    // the macro layer is imported by listing it, visibly, before the program
+    for (const s of body.filter((s) => s[0].name === 'filter')) {
+      const sources = s.slice(2).map((x) => x.name);
+      expect(sources.length).toBeGreaterThan(0);
+      for (const f of sources) expect(existsSync(f)).toBe(true);
+    }
+    expect(declared).toContain('wav');
+    expect(declared).toContain('rgb->y4m');
+    // and every verb a (let …) invokes is either declared here or a native sandbox
+    const native = new Set(['perl', 'speak', 'gpu']);
+    for (const s of body.filter((s) => s[0].name === 'let')) {
+      const verb = (s[2] as unknown as Sym[])[0].name;
+      expect(declared.has(verb) || native.has(verb)).toBe(true);
+    }
+  });
+
   it('perl writes the narration inside wasm', async () => {
     const { ZeroPerl } = await import('@6over3/zeroperl-ts');
     let out = '';

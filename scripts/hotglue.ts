@@ -8,13 +8,19 @@
  * carries bytes between them and never does anything a glue gun
  * would be ashamed of.
  *
+ * A film is self-contained: every wasm verb it uses beyond the four
+ * native sandboxes must be declared in the film itself, sources and
+ * macro layers listed in compile order, so the file names every file.
+ *
  * Steps:
+ *   (filter NAME SOURCES...)             declare a wasm verb: the nacre
+ *                                        sources compile to a stdin→stdout
+ *                                        program, macro layers first, as
+ *                                        on the nacre CLI
+ *   (let NAME (FILTER [INVAR]))          run a declared filter
  *   (let NAME (perl SCRIPT.pl))          zeroperl, Perl-5-in-wasm  → text
  *   (let NAME (speak TEXTVAR VOICE))     Kokoro under onnxruntime-wasm → f32 PCM
- *   (let NAME (wav PCMVAR))              wav.nacre wraps the container
  *   (let NAME (gpu SHADER.wgsl FRAMES))  WGSL compute via WebGPU → RGB
- *   (let NAME (rgb->y4m RGBVAR))         rgb2y4m.nacre glues the stream
- *   (let NAME (render FILES...))         a nacre module's stdout (e.g. Y4M)
  *   (cut [(loop) ]INPUTS...)             ffmpeg.wasm cuts the print
  *
  *   npx tsx scripts/hotglue.ts examples/film.hma
@@ -59,8 +65,12 @@ function nacreRun(files: string[], input: Buffer | string): Buffer {
 
 type Value = Buffer | string;
 
-async function step(form: Node[], env: Map<string, Value>): Promise<Value> {
+async function step(form: Node[], env: Map<string, Value>, filters: Map<string, string[]>): Promise<Value> {
   const op = name(form[0]);
+  if (filters.has(op)) {
+    const input = form[1] ? env.get(name(form[1]))! : Buffer.alloc(0);
+    return nacreRun(filters.get(op)!, input);
+  }
   if (op === 'perl') {
     const { ZeroPerl } = await import('@6over3/zeroperl-ts');
     let out = '';
@@ -82,7 +92,6 @@ async function step(form: Node[], env: Map<string, Value>): Promise<Value> {
     console.log(`  kokoro spoke ${(pcm.length / 4 / 24000).toFixed(1)}s in the sandbox`);
     return pcm;
   }
-  if (op === 'wav') return nacreRun(['src/nacre/clj.nacre', 'examples/wav.nacre'], env.get(name(form[1]))!);
   if (op === 'gpu') {
     const out = join(dir, 'frames.rgb');
     await promisify(execFile)('node', ['scripts/gpu-render.mjs'], {
@@ -93,11 +102,7 @@ async function step(form: Node[], env: Map<string, Value>): Promise<Value> {
     console.log(`  webgpu rendered ${rgb.length / 196608} frames`);
     return rgb;
   }
-  if (op === 'rgb->y4m')
-    return nacreRun(['src/nacre/clj.nacre', 'examples/rgb2y4m.nacre'], env.get(name(form[1]))!);
-  if (op === 'render')
-    return nacreRun(form.slice(1).map(name), Buffer.alloc(0));
-  throw new Error(`hotglue does not know how to ${op}`);
+  throw new Error(`hotglue does not know how to ${op} — declare it: (filter ${op} macros.nacre program.nacre)`);
 }
 
 async function cut(out: string, inputs: Node[], env: Map<string, Value>): Promise<void> {
@@ -132,10 +137,12 @@ for (const form of forms) {
   if (!Array.isArray(form) || name(form[0]) !== 'film') continue;
   const out = name(form[1] as Node);
   const env = new Map<string, Value>();
+  const filters = new Map<string, string[]>();
   console.log(`hotglue: ${file} → ${out}`);
   for (const s of form.slice(2) as Node[][]) {
     const head = name(s[0]);
-    if (head === 'let') env.set(name(s[1]), await step(s[2] as Node[], env));
+    if (head === 'filter') filters.set(name(s[1]), s.slice(2).map(name));
+    else if (head === 'let') env.set(name(s[1]), await step(s[2] as Node[], env, filters));
     else if (head === 'cut') await cut(out, s.slice(1), env);
     else throw new Error(`unknown film step: ${head}`);
   }
