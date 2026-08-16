@@ -1,0 +1,76 @@
+;; rgb2y4m.nacre — the Lisp glues pixels into a stream.
+;;
+;; Reads raw RGB24 frames (256 by 256, concatenated) on stdin and
+;; emits YUV4MPEG2 on stdout — the same integer BT.601 the other
+;; renderers use, so a GPU that only knows RGBA can still hand its
+;; frames to ffmpeg. Frame count is whatever stdin holds.
+;;
+;;   npx tsx src/nacre/cli.ts src/nacre/clj.nacre examples/rgb2y4m.nacre > rgb2y4m.wat
+;;   wasmtime rgb2y4m.wat < frames.rgb > frames.y4m
+
+(module
+  (import "wasi_snapshot_preview1" "fd_read"
+    (func $fd_read (param i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_write"
+    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 16)
+
+  (func $read-all (result i32)
+    (let [$n 0]
+      (block $done
+        (loop $more
+          (while (> (+ (+ 4096 (local.get $n)) 65536) (* (memory.size) 65536))
+            (drop (memory.grow (num 16))))
+          (i32.store (i32.const 0) (+ 4096 (local.get $n)))
+          (i32.store (i32.const 4) (num 65536))
+          (drop (call $fd_read (num 0) (num 0) (num 1) (num 8)))
+          (br_if $done (zero? (i32.load (i32.const 8))))
+          (local.set $n (+ (local.get $n) (i32.load (i32.const 8))))
+          (br $more)))
+      (local.get $n)))
+
+  (func $put (param $ptr i32) (param $len i32)
+    (while (> (local.get $len) 0)
+      (i32.store (i32.const 0) (local.get $ptr))
+      (i32.store (i32.const 4) (local.get $len))
+      (drop (call $fd_write (num 1) (num 0) (num 1) (num 8)))
+      (local.set $ptr (+ (local.get $ptr) (i32.load (i32.const 8))))
+      (local.set $len (- (local.get $len) (i32.load (i32.const 8))))))
+
+  ;; one frame: RGB at $in, planes at $y, $y+65536, $y+131072
+  (func $convert (param $in i32) (param $y i32)
+    (let [$o 0 $p 0 $r 0 $g 0 $b 0]
+      (local.set $p (local.get $in))
+      (while (< (local.get $o) 65536)
+        (local.set $r (i32.load8_u (local.get $p)))
+        (local.set $g (i32.load8_u (+ (local.get $p) 1)))
+        (local.set $b (i32.load8_u (+ (local.get $p) 2)))
+        (i32.store8 (+ (local.get $y) (local.get $o))
+          (bit-shift-right (+ (+ (* 77 (local.get $r)) (* 150 (local.get $g)))
+                              (* 29 (local.get $b)))
+                           8))
+        (i32.store8 (+ (+ (local.get $y) 65536) (local.get $o))
+          (+ 128 (bit-shift-right (+ (- (* -43 (local.get $r)) (* 85 (local.get $g)))
+                                     (* 128 (local.get $b)))
+                                  8)))
+        (i32.store8 (+ (+ (local.get $y) 131072) (local.get $o))
+          (+ 128 (bit-shift-right (- (- (* 128 (local.get $r)) (* 107 (local.get $g)))
+                                     (* 21 (local.get $b)))
+                                  8)))
+        (local.set $o (inc (local.get $o)))
+        (local.set $p (+ (local.get $p) 3)))))
+
+  (func (export "_start")
+    (let [$bytes (call $read-all) $frames 0 $f 0 $planes 0]
+      (local.set $frames (quot (local.get $bytes) 196608))
+      (local.set $planes (+ 4096 (local.get $bytes)))
+      (while (> (+ (+ (local.get $planes) 262144) 65536) (* (memory.size) 65536))
+        (drop (memory.grow (num 16))))
+      (call $put "YUV4MPEG2 W256 H256 F30:1 Ip A1:1 C444\n")
+      (while (< (local.get $f) (local.get $frames))
+        (call $convert (+ 4096 (* (local.get $f) 196608)) (local.get $planes))
+        (call $put "FRAME\n")
+        (call $put (local.get $planes) (num 65536))
+        (call $put (+ (local.get $planes) 65536) (num 65536))
+        (call $put (+ (local.get $planes) 131072) (num 65536))
+        (local.set $f (inc (local.get $f)))))))

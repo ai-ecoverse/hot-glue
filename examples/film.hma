@@ -1,0 +1,17 @@
+;; film.hma — hot melt adhesive, applied at working temperature.
+;;
+;; A film described in the Lisp's own notation and interpreted by
+;; scripts/hotglue.ts. Every step below runs its hot path in a
+;; sandbox: Perl writes the words in wasm, Kokoro speaks them in
+;; wasm, WebGPU renders the picture, the nacre modules glue pixels
+;; and samples into streams, and ffmpeg.wasm cuts the print.
+;;
+;;   npx tsx scripts/hotglue.ts examples/film.hma
+
+(film gpu-perlmutt.mp4
+  (let text (perl examples/narration.pl))
+  (let pcm (speak text af_heart))
+  (let audio (wav pcm))
+  (let rgb (gpu examples/mandel.wgsl 150))
+  (let video (rgb->y4m rgb))
+  (cut (loop video) audio))
