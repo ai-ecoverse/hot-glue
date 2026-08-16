@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile } from '../../src/hotglue/bootstrap.js';
+import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
 import { lower } from '../../src/hotglue/binaryen-lower.js';
 
 function wasmtime(): string | null {
@@ -20,7 +20,7 @@ function wasmtime(): string | null {
 const runtime = wasmtime();
 
 const dir = mkdtempSync(join(tmpdir(), 'hotglue-binaryen-'));
-const src = (...files: string[]) => files.map((f) => readFileSync(f, 'utf8')).join('\n');
+const src = (...files: string[]) => loadSource(files);
 
 describe.skipIf(!runtime)('binaryen — the alternate lowering', () => {
   it('lowers and optimizes fizzbuzz, which still runs', () => {
@@ -33,7 +33,7 @@ describe.skipIf(!runtime)('binaryen — the alternate lowering', () => {
   });
 
   it('the optimized assembler still assembles byte-identically', () => {
-    const asWat = compile(src('src/hotglue/prelude.hma', 'src/hotglue/as.hma'));
+    const asWat = compile(src('src/hotglue/as.hma'));
     const asWatFile = join(dir, 'as.wat');
     const asOptFile = join(dir, 'as.opt.wasm');
     writeFileSync(asWatFile, asWat);

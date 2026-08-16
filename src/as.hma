@@ -15,6 +15,8 @@
 ;; 1 sym (a ptr, b len), 2 str (a ptr, b len), 3 pair (a car, b cdr),
 ;; 4 nil.
 
+(use prelude.hma)
+
 (module
   (import "wasi_snapshot_preview1" "fd_read"
     (func $fd_read (param i32 i32 i32 i32) (result i32)))

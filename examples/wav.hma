@@ -10,6 +10,8 @@
 ;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/wav.hma > wav.wat
 ;;   wasmtime wav.wat < voice.f32 > voice.wav
 
+(use clj.hma)
+
 (module
   (import "wasi_snapshot_preview1" "fd_read"
     (func $fd_read (param i32 i32 i32 i32) (result i32)))

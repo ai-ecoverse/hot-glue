@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { crc32 } from 'node:zlib';
-import { compile } from '../../src/hotglue/bootstrap.js';
+import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
 
 function wasmtime(): string | null {
   for (const bin of ['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')]) {
@@ -20,7 +20,7 @@ function wasmtime(): string | null {
 const runtime = wasmtime();
 
 const dir = mkdtempSync(join(tmpdir(), 'hotglue-interop-'));
-const src = (...files: string[]) => files.map((f) => readFileSync(f, 'utf8')).join('\n');
+const src = (...files: string[]) => loadSource(files);
 
 // MurmurHash3's finalizer, the reference the Rust module must match
 const fmix32 = (h: number): number => {
@@ -45,9 +45,9 @@ const mandelWat = join(dir, 'mandelbrot.wat');
 const asWat = join(dir, 'as.wat');
 
 beforeAll(() => {
-  writeFileSync(interopWat, compile(src('src/hotglue/clj.hma', 'examples/interop.hma')));
-  writeFileSync(mandelWat, compile(src('src/hotglue/clj.hma', 'examples/mandelbrot.hma')));
-  writeFileSync(asWat, compile(src('src/hotglue/prelude.hma', 'src/hotglue/as.hma')));
+  writeFileSync(interopWat, compile(src('examples/interop.hma')));
+  writeFileSync(mandelWat, compile(src('examples/mandelbrot.hma')));
+  writeFileSync(asWat, compile(src('src/hotglue/as.hma')));
 });
 
 describe.skipIf(!runtime)('the binary wilderness', () => {

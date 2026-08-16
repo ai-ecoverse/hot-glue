@@ -10,6 +10,8 @@
 ;;   wasmtime run --preload c=examples/native/crc32.wasm \
 ;;                --preload rust=examples/native/fmix.wasm interop.wat
 
+(use clj.hma)
+
 (module
   (import "c" "poke" (func $poke (param i32 i32)))
   (import "c" "crc32" (func $crc32 (param i32) (result i32)))

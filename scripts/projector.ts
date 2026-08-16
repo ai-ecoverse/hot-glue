@@ -31,7 +31,7 @@ import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { compile, read, Sym, type Node } from '../src/hotglue/bootstrap.js';
+import { compile, loadSource, read, Sym, type Node } from '../src/hotglue/bootstrap.js';
 
 const wasmtime = (() => {
   for (const bin of ['wasmtime', join(homedir(), '.local/bin/wasmtime')]) {
@@ -57,7 +57,7 @@ function filterRun(files: string[], input: Buffer | string): Buffer {
   const key = files.join('+');
   if (!wats.has(key)) {
     const p = join(dir, `${wats.size}.wat`);
-    writeFileSync(p, compile(files.map((f) => readFileSync(f, 'utf8')).join('\n')));
+    writeFileSync(p, compile(loadSource(files)));
     wats.set(key, p);
   }
   return execFileSync(wasmtime, [wats.get(key)!], { input, maxBuffer: 1 << 28 });

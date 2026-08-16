@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile } from '../../src/hotglue/bootstrap.js';
+import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
 
 function probe(bins: string[], flag: string): string | null {
   for (const bin of bins) {
@@ -20,7 +20,7 @@ const runtime = probe(['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasm
 const weights = existsSync('examples/oyster.npt');
 
 const dir = mkdtempSync(join(tmpdir(), 'hotglue-gpt-'));
-const src = (...f: string[]) => f.map((x) => readFileSync(x, 'utf8')).join('\n');
+const src = (...f: string[]) => loadSource(f);
 
 // stdin blob: [.npt weights][u32 plen][prompt][u32 gen][f32 temp][u32 seed]
 function blob(prompt: string, gen: number, temp: number, seed: number): Buffer {
@@ -41,8 +41,8 @@ beforeAll(() => {
   if (!runtime) return;
   const asWat = join(dir, 'as.wat');
   const gptWat = join(dir, 'gpt.wat');
-  writeFileSync(asWat, compile(src('src/hotglue/prelude.hma', 'src/hotglue/as.hma')));
-  writeFileSync(gptWat, compile(src('src/hotglue/clj.hma', 'examples/gpt.hma')));
+  writeFileSync(asWat, compile(src('src/hotglue/as.hma')));
+  writeFileSync(gptWat, compile(src('examples/gpt.hma')));
   gptWasm = join(dir, 'gpt.wasm');
   writeFileSync(gptWasm, execFileSync(runtime, [asWat], { input: readFileSync(gptWat), maxBuffer: 1 << 24 }));
 });

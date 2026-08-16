@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile } from '../../src/hotglue/bootstrap.js';
+import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
 
 function probe(bins: string[], flag: string): string | null {
   for (const bin of bins) {
@@ -20,7 +20,7 @@ const runtime = probe(['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasm
 const ffmpeg = probe(['ffmpeg'], '-version');
 
 const dir = mkdtempSync(join(tmpdir(), 'hotglue-video-'));
-const src = (...files: string[]) => files.map((f) => readFileSync(f, 'utf8')).join('\n');
+const src = (...files: string[]) => loadSource(files);
 const zoomWat = join(dir, 'mandelzoom.wat');
 const y4mFile = join(dir, 'zoom.y4m');
 
@@ -28,7 +28,7 @@ const HEADER = 'YUV4MPEG2 W256 H256 F30:1 Ip A1:1 C444\n';
 const FRAME = 6 + 3 * 65536;
 
 beforeAll(() => {
-  writeFileSync(zoomWat, compile(src('src/hotglue/clj.hma', 'examples/mandelzoom.hma')));
+  writeFileSync(zoomWat, compile(src('examples/mandelzoom.hma')));
   if (runtime) writeFileSync(y4mFile, execFileSync(runtime, [zoomWat], { maxBuffer: 1 << 26 }));
 }, 120000);
 

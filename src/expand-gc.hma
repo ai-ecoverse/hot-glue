@@ -18,6 +18,8 @@
 ;; Memory: 0 iovec, 8 io-count, 12 heap pointer, 20 cursor, 24 input
 ;; base, 28 input length, 65540 mark counter, 65548 pool offset.
 
+(use prelude.hma)
+
 (module
   (rec
     (type $node (sub (struct)))

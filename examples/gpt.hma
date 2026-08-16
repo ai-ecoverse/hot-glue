@@ -19,6 +19,8 @@
 ;; 108 temp(f32), 112 seed, 116 hd, 124 scores, 128 scale(f32),
 ;; 132 layer-stride, 136 tmp, 140.. layer offsets.
 
+(use clj.hma)
+
 (module
   (type $q-v (func))
   (type $q-i (func (result i32)))

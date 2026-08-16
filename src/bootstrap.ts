@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
 /**
  * Hot Glue, stage 0 — the bootstrap expander (docs/wasm-macros.md § 9).
  *
@@ -23,6 +26,77 @@ export class Sym {
   }
 }
 export type Node = number | string | Sym | Node[];
+
+// ------------------------------------------------------------ imports
+//
+// A top-level (use name.hma) splices the named file from the lookup
+// path in place of the form, once per name — the second use of a name
+// anywhere in the program splices nothing. Resolution is textual and
+// byte-faithful: everything that is not a top-level use form passes
+// through verbatim, comments and strings respected, so all engines
+// that resolve imports produce the identical stream. The wasm driver
+// mirrors this state machine; keep them in lockstep.
+
+export function resolveUses(
+  src: string,
+  readNamed: (name: string) => string,
+  seen: Set<string> = new Set(),
+): string {
+  let out = '';
+  let i = 0;
+  let depth = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === ';' && src[i + 1] === ';') {
+      let j = src.indexOf('\n', i);
+      if (j < 0) j = src.length;
+      out += src.slice(i, j);
+      i = j;
+    } else if (c === '(' && src[i + 1] === ';') {
+      const e = src.indexOf(';)', i);
+      const j = e < 0 ? src.length : e + 2;
+      out += src.slice(i, j);
+      i = j;
+    } else if (c === '"') {
+      let j = i + 1;
+      while (j < src.length && src[j] !== '"') j += src[j] === '\\' ? 2 : 1;
+      j++;
+      out += src.slice(i, j);
+      i = j;
+    } else if (c === '(' && depth === 0 && src.startsWith('use', i + 1) && /\s/.test(src[i + 4] ?? '')) {
+      const close = src.indexOf(')', i);
+      if (close < 0) throw new Error('use: unclosed form');
+      const name = src.slice(i + 4, close).trim();
+      i = close + 1;
+      if (!seen.has(name)) {
+        seen.add(name);
+        out += resolveUses(readNamed(name), readNamed, seen);
+      }
+    } else {
+      if (c === '(') depth++;
+      if (c === ')') depth--;
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
+
+// Load entry files, resolving (use …) against the lookup path: the
+// entries' own directories, any extra dirs, then the toolchain's home.
+export function loadSource(paths: string[], extraDirs: string[] = []): string {
+  const seen = new Set<string>();
+  const home = dirname(new URL(import.meta.url).pathname);
+  const dirs = [...paths.map((p) => dirname(p)), ...extraDirs, 'src/hotglue', home];
+  const readNamed = (name: string): string => {
+    for (const d of dirs) {
+      const p = join(d, name);
+      if (existsSync(p)) return readFileSync(p, 'utf8');
+    }
+    throw new Error(`use: ${name} not found (looked in ${dirs.join(', ')})`);
+  };
+  return paths.map((p) => resolveUses(readFileSync(p, 'utf8'), readNamed, seen)).join('\n');
+}
 
 const sym = (name: string) => new Sym(name);
 const key = (s: Sym) => (s.marks ? `${s.name}#${s.marks.toString(36)}` : s.name);

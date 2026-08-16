@@ -44,9 +44,9 @@ const expand = (out, ...files) =>
   writeFileSync(join(dir, out), execFileSync("npx", ["tsx", "src/hotglue/cli.ts", ...files], { maxBuffer: 1 << 26 }));
 
 console.log("expanding the hot glue modules…");
-expand("deepzoom.wat", "src/hotglue/clj.hma", "examples/deepzoom.hma");
-expand("wav.wat", "src/hotglue/clj.hma", "examples/wav.hma");
-expand("as.wat", "src/hotglue/prelude.hma", "src/hotglue/as.hma");
+expand("deepzoom.wat", "examples/deepzoom.hma");
+expand("wav.wat", "examples/wav.hma");
+expand("as.wat", "src/hotglue/as.hma");
 
 console.log("assembling with the self-hosted assembler…");
 const deepWasm = join(dir, "deepzoom.wasm");

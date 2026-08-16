@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile } from '../../src/hotglue/bootstrap.js';
+import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
 
 function probe(bins: string[], flag: string): string | null {
   for (const bin of bins) {
@@ -20,7 +20,7 @@ function probe(bins: string[], flag: string): string | null {
 const runtime = probe(['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')], '--version');
 
 const dir = mkdtempSync(join(tmpdir(), 'hotglue-wasmpeg-'));
-const src = (...files: string[]) => files.map((f) => readFileSync(f, 'utf8')).join('\n');
+const src = (...files: string[]) => loadSource(files);
 
 // The Emscripten core of ffmpeg.wasm predates Node's global fetch and
 // misdetects its environment when it sees one. Take it away for the
@@ -39,8 +39,8 @@ beforeAll(async () => {
   await ffmpeg.load();
   // both video sources, rendered by wasmtime from hotglue-built modules
   for (const [name, files] of [
-    ['a.y4m', ['src/hotglue/clj.hma', 'examples/mandelzoom.hma']],
-    ['b.y4m', ['src/hotglue/clj.hma', 'examples/deepzoom.hma']],
+    ['a.y4m', ['examples/mandelzoom.hma']],
+    ['b.y4m', ['examples/deepzoom.hma']],
   ] as const) {
     const wat = join(dir, name + '.wat');
     writeFileSync(wat, compile(src(...files)));

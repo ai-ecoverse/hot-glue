@@ -13,6 +13,8 @@
 ;; expander as text — hygiene never looks inside a number — and the
 ;; assembler mints their IEEE bits at the very end.
 
+(use clj.hma)
+
 (module
   (type $q-v (func))
   (type $q-i (func (result i32)))

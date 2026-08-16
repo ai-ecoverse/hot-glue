@@ -12,13 +12,15 @@
  * self-hosted assembler (as.hma).
  */
 import { readFileSync } from 'node:fs';
-import { compile } from './bootstrap.js';
+import { compile, loadSource, resolveUses } from './bootstrap.js';
 
 try {
   const args = process.argv.slice(2);
   const viaBinaryen = args[0] === '-O';
   const files = viaBinaryen ? args.slice(1) : args;
-  const src = files.length ? files.map((f) => readFileSync(f, 'utf8')).join('\n') : readFileSync(0, 'utf8');
+  const src = files.length
+    ? loadSource(files)
+    : resolveUses(readFileSync(0, 'utf8'), (name) => readFileSync(`src/hotglue/${name}`, 'utf8'));
   const wat = compile(src);
   if (viaBinaryen) {
     const { lower } = await import('./binaryen-lower.js');

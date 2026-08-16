@@ -10,12 +10,12 @@
 
 (film gpu-perlmutt.mp4
   ;; The film declares its own toolchain. A filter is a wasm program,
-  ;; stdin to stdout, compiled from the sources named here — macro
-  ;; layers first, then the program, the same convention as the Hot Glue
-  ;; CLI. Nothing below arrives implicitly: every file this film
-  ;; touches is written in this file.
-  (filter wav src/hotglue/clj.hma examples/wav.hma)
-  (filter rgb->y4m src/hotglue/clj.hma examples/rgb2y4m.hma)
+  ;; stdin to stdout, compiled from the source named here; the source
+  ;; declares its own macro imports with (use …), the same convention
+  ;; as everywhere else. Nothing below arrives implicitly: every file
+  ;; this film touches is written in this file or in a (use …) of one.
+  (filter wav examples/wav.hma)
+  (filter rgb->y4m examples/rgb2y4m.hma)
 
   (let text (perl examples/narration.pl))
   (let pcm (speak text af_heart))

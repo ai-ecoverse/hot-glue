@@ -13,6 +13,8 @@
 ;; rather hold the framebuffer themselves — the browser canvas, or
 ;; an ffmpeg frei0r plugin with a wasm runtime inside.
 
+(use clj.hma)
+
 (module
   (import "wasi_snapshot_preview1" "fd_write"
     (func $fd_write (param i32 i32 i32 i32) (result i32)))

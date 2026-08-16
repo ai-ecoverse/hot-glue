@@ -4,6 +4,8 @@
 ;;   wasmtime run --invoke steps collatz.wat 27        ;; 111
 ;;   wasmtime run --invoke sum-squares collatz.wat     ;; 285
 
+(use clj.hma)
+
 (module
   (comment
     loop recur threading flat-let-bindings and arithmetic that wraps
