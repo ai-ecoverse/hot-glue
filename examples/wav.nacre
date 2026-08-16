@@ -1,0 +1,78 @@
+;; wav.nacre — the Lisp writes the container; the sandbox sings.
+;;
+;; Reads raw 32-bit float PCM (mono, 24kHz, little-endian) on stdin
+;; and emits a RIFF/WAVE file of 16-bit samples on stdout: clamp,
+;; scale, truncate — the floats doing honest work. This is the glue
+;; layer of the perlmutt pipeline: the voice is synthesized by a
+;; neural net running in a wasm sandbox, the film is cut by ffmpeg
+;; compiled to wasm, and the Lisp holds the header between them.
+;;
+;;   npx tsx src/nacre/cli.ts src/nacre/clj.nacre examples/wav.nacre > wav.wat
+;;   wasmtime wav.wat < voice.f32 > voice.wav
+
+(module
+  (import "wasi_snapshot_preview1" "fd_read"
+    (func $fd_read (param i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_write"
+    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 16)
+
+  ;; input lands at 4096; grow as it comes; length ends up in $n
+  (func $read-all (result i32)
+    (let [$n 0 $r 0]
+      (block $done
+        (loop $more
+          (while (> (+ (+ 4096 (local.get $n)) 65536) (* (memory.size) 65536))
+            (drop (memory.grow (num 16))))
+          (i32.store (i32.const 0) (+ 4096 (local.get $n)))
+          (i32.store (i32.const 4) (num 65536))
+          (drop (call $fd_read (num 0) (num 0) (num 1) (num 8)))
+          (br_if $done (zero? (i32.load (i32.const 8))))
+          (local.set $n (+ (local.get $n) (i32.load (i32.const 8))))
+          (br $more)))
+      (local.get $n)))
+
+  (func $put (param $ptr i32) (param $len i32)
+    (while (> (local.get $len) 0)
+      (i32.store (i32.const 0) (local.get $ptr))
+      (i32.store (i32.const 4) (local.get $len))
+      (drop (call $fd_write (num 1) (num 0) (num 1) (num 8)))
+      (local.set $ptr (+ (local.get $ptr) (i32.load (i32.const 8))))
+      (local.set $len (- (local.get $len) (i32.load (i32.const 8))))))
+
+  ;; copy a pooled string into the header under construction
+  (func $blit (param $dst i32) (param $src i32) (param $len i32)
+    (memory.copy (local.get $dst) (local.get $src) (local.get $len)))
+
+  (func (export "_start")
+    (local $s f32)
+    (let [$bytes (call $read-all) $count 0 $data 0 $in 0 $out 0 $i 0 $v 0]
+      (local.set $count (quot (local.get $bytes) 4))
+      (local.set $data (* 2 (local.get $count)))
+      ;; the canonical forty-four bytes, built at 128
+      (call $blit (num 128) "RIFF")
+      (i32.store (i32.const 132) (+ 36 (local.get $data)))
+      (call $blit (num 136) "WAVE")
+      (call $blit (num 140) "fmt ")
+      (i32.store (i32.const 144) (num 16))
+      (i32.store16 (i32.const 148) (num 1))
+      (i32.store16 (i32.const 150) (num 1))
+      (i32.store (i32.const 152) (num 24000))
+      (i32.store (i32.const 156) (num 48000))
+      (i32.store16 (i32.const 160) (num 2))
+      (i32.store16 (i32.const 162) (num 16))
+      (call $blit (num 164) "data")
+      (i32.store (i32.const 168) (local.get $data))
+      ;; samples: clamp to [-1, 1], scale, truncate, pack behind input
+      (local.set $in (num 4096))
+      (local.set $out (+ 4096 (local.get $bytes)))
+      (while (> (+ (+ (local.get $out) (local.get $data)) 65536) (* (memory.size) 65536))
+        (drop (memory.grow (num 16))))
+      (while (< (local.get $i) (local.get $count))
+        (local.set $s (f32.load (+ (local.get $in) (* 4 (local.get $i)))))
+        (local.set $s (f32.min (f32.const 1) (f32.max (f32.const -1) (local.get $s))))
+        (local.set $v (i32.trunc_f32_s (f32.mul (local.get $s) (f32.const 32767))))
+        (i32.store16 (+ (local.get $out) (* 2 (local.get $i))) (local.get $v))
+        (local.set $i (inc (local.get $i))))
+      (call $put (num 128) (num 44))
+      (call $put (local.get $out) (local.get $data)))))
