@@ -955,7 +955,7 @@
 
   ;; ----------------------------------------------------------- main
 
-  (func (export "_start") (type $q-v)
+  (func (export "run") (type $q-v)
     ($let (($top-h (ref $node) ($nil!)) ($top-t (ref null $node) (ref.null none))
            ($out-h (ref $node) ($nil!)) ($out-t (ref null $node) (ref.null none))
            ($reg (ref $box) (call $box))

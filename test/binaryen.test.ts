@@ -39,8 +39,8 @@ describe.skipIf(!runtime)('binaryen — the alternate lowering', () => {
     writeFileSync(asWatFile, asWat);
     writeFileSync(asOptFile, lower(asWat));
     const fbWat = compile(readFileSync('examples/fizzbuzz.hma', 'utf8'));
-    const ref = execFileSync(runtime!, [asWatFile], { input: fbWat, maxBuffer: 1 << 26 });
-    const opt = execFileSync(runtime!, [asOptFile], { input: fbWat, maxBuffer: 1 << 26 });
+    const ref = execFileSync(runtime!, ['run', '--invoke', 'run', asWatFile], { input: fbWat, maxBuffer: 1 << 26 });
+    const opt = execFileSync(runtime!, ['run', '--invoke', 'run', asOptFile], { input: fbWat, maxBuffer: 1 << 26 });
     expect(opt.equals(ref)).toBe(true);
   });
 

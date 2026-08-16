@@ -24,7 +24,7 @@ const asWat = join(dir, 'as.wat');
 
 const src = (...files: string[]) => loadSource(files);
 const pipe = (module: string, input: string | Buffer): Buffer =>
-  execFileSync(runtime!, [module], { input, maxBuffer: 1 << 26 });
+  execFileSync(runtime!, ['run', '--invoke', 'run', module], { input, maxBuffer: 1 << 26 });
 
 beforeAll(() => {
   writeFileSync(expandWat, compile(src('src/hotglue/expand.hma')));

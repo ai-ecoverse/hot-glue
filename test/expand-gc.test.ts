@@ -25,7 +25,7 @@ const asWat = join(dir, 'as.wat');
 const src = (...files: string[]) => loadSource(files);
 const GC = ['-W', 'gc,function-references'];
 const pipe = (module: string, input: string | Buffer): Buffer =>
-  execFileSync(runtime!, ['run', ...GC, module], { input, maxBuffer: 1 << 26 });
+  execFileSync(runtime!, ['run', ...GC, '--invoke', 'run', module], { input, maxBuffer: 1 << 26 });
 
 beforeAll(() => {
   writeFileSync(gcWat, compile(src('src/hotglue/expand-gc.hma')));
@@ -56,13 +56,13 @@ describe.skipIf(!runtime)('expand-gc.hma — the expander on the GC heap', () =>
   it('runs on the heap it can be assembled from: the GC loop closes', () => {
     // The self-hosted assembler assembles the GC expander into a GC binary.
     const gcWasm = join(dir, 'expand-gc.wasm');
-    writeFileSync(gcWasm, execFileSync(runtime!, [asWat], { input: readFileSync(gcWat), maxBuffer: 1 << 26 }));
+    writeFileSync(gcWasm, execFileSync(runtime!, ['run', '--invoke', 'run', asWat], { input: readFileSync(gcWat), maxBuffer: 1 << 26 }));
     // That binary expands its own source; the assembler (as a binary
     // it assembled itself) reassembles it; the bytes must agree.
     const asWasm = join(dir, 'as.wasm');
-    writeFileSync(asWasm, execFileSync(runtime!, [asWat], { input: readFileSync(asWat), maxBuffer: 1 << 26 }));
+    writeFileSync(asWasm, execFileSync(runtime!, ['run', '--invoke', 'run', asWat], { input: readFileSync(asWat), maxBuffer: 1 << 26 }));
     const again = pipe(gcWasm, src('src/hotglue/expand-gc.hma'));
-    const rebuilt = execFileSync(runtime!, [asWasm], { input: again, maxBuffer: 1 << 26 });
+    const rebuilt = execFileSync(runtime!, ['run', '--invoke', 'run', asWasm], { input: again, maxBuffer: 1 << 26 });
     expect(rebuilt.equals(readFileSync(gcWasm))).toBe(true);
   });
 });

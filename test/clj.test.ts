@@ -52,7 +52,7 @@ describe.skipIf(!runtime)('clj.hma — the Clojure accent', () => {
   it('the assembled binary agrees', () => {
     const asWat = join(dir, 'as.wat');
     writeFileSync(asWat, compile(src('src/hotglue/as.hma')));
-    const bin = execFileSync(runtime!, [asWat], { input: readFileSync(watFile), maxBuffer: 1 << 26 });
+    const bin = execFileSync(runtime!, ['run', '--invoke', 'run', asWat], { input: readFileSync(watFile), maxBuffer: 1 << 26 });
     const wasm = join(dir, 'collatz.wasm');
     writeFileSync(wasm, bin);
     const got = execFileSync(runtime!, ['run', '--invoke', 'steps', wasm, '27'], {

@@ -50,7 +50,7 @@ expand("as.wat", "src/hotglue/as.hma");
 
 console.log("assembling with the self-hosted assembler…");
 const deepWasm = join(dir, "deepzoom.wasm");
-writeFileSync(deepWasm, execFileSync(wasmtime, [join(dir, "as.wat")], {
+writeFileSync(deepWasm, execFileSync(wasmtime, ["run", "--invoke", "run", join(dir, "as.wat")], {
   input: readFileSync(join(dir, "deepzoom.wat")),
   maxBuffer: 1 << 26,
 }));

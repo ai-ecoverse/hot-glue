@@ -44,7 +44,7 @@ beforeAll(() => {
   writeFileSync(asWat, compile(src('src/hotglue/as.hma')));
   writeFileSync(gptWat, compile(src('examples/gpt.hma')));
   gptWasm = join(dir, 'gpt.wasm');
-  writeFileSync(gptWasm, execFileSync(runtime, [asWat], { input: readFileSync(gptWat), maxBuffer: 1 << 24 }));
+  writeFileSync(gptWasm, execFileSync(runtime, ['run', '--invoke', 'run', asWat], { input: readFileSync(gptWat), maxBuffer: 1 << 24 }));
 });
 
 function speak(prompt: string, gen: number, temp: number, seed: number): Buffer {

@@ -62,7 +62,7 @@ describe.skipIf(!runtime)('the binary wilderness', () => {
   });
 
   it('the hotglue-assembled binary sits in the same food chain', () => {
-    const bin = execFileSync(runtime!, [asWat], { input: readFileSync(interopWat), maxBuffer: 1 << 26 });
+    const bin = execFileSync(runtime!, ['run', '--invoke', 'run', asWat], { input: readFileSync(interopWat), maxBuffer: 1 << 26 });
     const wasm = join(dir, 'interop.wasm');
     writeFileSync(wasm, bin);
     const got = execFileSync(runtime!, ['run', ...PRELOADS, wasm], { maxBuffer: 1 << 26 }).toString();
@@ -83,7 +83,7 @@ describe.skipIf(!runtime)('the binary wilderness', () => {
   });
 
   it('the assembled mandelbrot paints the same picture', () => {
-    const bin = execFileSync(runtime!, [asWat], { input: readFileSync(mandelWat), maxBuffer: 1 << 26 });
+    const bin = execFileSync(runtime!, ['run', '--invoke', 'run', asWat], { input: readFileSync(mandelWat), maxBuffer: 1 << 26 });
     const wasm = join(dir, 'mandelbrot.wasm');
     writeFileSync(wasm, bin);
     const a = execFileSync(runtime!, [mandelWat], { maxBuffer: 1 << 26 });

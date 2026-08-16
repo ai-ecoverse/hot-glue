@@ -23,7 +23,7 @@ const asWat = join(dir, 'as.wat');
 
 /** Run a module (wat text or wasm binary path) as the assembler, stdin → stdout. */
 const assemble = (module: string, input: string | Buffer): Buffer =>
-  execFileSync(runtime!, [module], { input, maxBuffer: 1 << 26 });
+  execFileSync(runtime!, ['run', '--invoke', 'run', module], { input, maxBuffer: 1 << 26 });
 
 const run = (wasm: Buffer, args: string[] = []): Buffer => {
   const f = join(dir, `run-${wasm.length}.wasm`);

@@ -44,7 +44,7 @@ beforeAll(() => {
 describe.skipIf(!runtime)('floating point — the missing vowels', () => {
   it('assembles f64 constants within an ulp or two of the truth', () => {
     const wasm = join(dir, 'constants.wasm');
-    writeFileSync(wasm, execFileSync(runtime!, [asWat], { input: compile(CONSTANTS), maxBuffer: 1 << 26 }));
+    writeFileSync(wasm, execFileSync(runtime!, ['run', '--invoke', 'run', asWat], { input: compile(CONSTANTS), maxBuffer: 1 << 26 }));
     const close = (got: number, want: number) =>
       expect(Math.abs(got - want)).toBeLessThanOrEqual(Math.abs(want) * 1e-14);
     close(invoke(wasm, 'pi'), Math.PI);
@@ -59,18 +59,18 @@ describe.skipIf(!runtime)('floating point — the missing vowels', () => {
     const want = compile(source);
     const expandWat = join(dir, 'expand.wat');
     writeFileSync(expandWat, compile(src('src/hotglue/expand.hma')));
-    expect(execFileSync(runtime!, [expandWat], { input: source, maxBuffer: 1 << 26 }).toString()).toBe(want);
+    expect(execFileSync(runtime!, ['run', '--invoke', 'run', expandWat], { input: source, maxBuffer: 1 << 26 }).toString()).toBe(want);
     const gcWat = join(dir, 'expand-gc.wat');
     writeFileSync(gcWat, compile(src('src/hotglue/expand-gc.hma')));
     expect(
-      execFileSync(runtime!, ['run', ...GC, gcWat], { input: source, maxBuffer: 1 << 26 }).toString(),
+      execFileSync(runtime!, ['run', ...GC, '--invoke', 'run', gcWat], { input: source, maxBuffer: 1 << 26 }).toString(),
     ).toBe(want);
   });
 
   it('deepzoom: the hotglue-assembled f64 binary dives a million deep', () => {
     const wat = compile(src('examples/deepzoom.hma'));
     const wasm = join(dir, 'deepzoom.wasm');
-    writeFileSync(wasm, execFileSync(runtime!, [asWat], { input: wat, maxBuffer: 1 << 26 }));
+    writeFileSync(wasm, execFileSync(runtime!, ['run', '--invoke', 'run', asWat], { input: wat, maxBuffer: 1 << 26 }));
     const y4m = execFileSync(runtime!, [wasm], { maxBuffer: 1 << 27 });
     const HEADER = 'YUV4MPEG2 W256 H256 F30:1 Ip A1:1 C444\n';
     const FRAME = 6 + 3 * 65536;

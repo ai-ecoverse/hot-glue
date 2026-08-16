@@ -1,10 +1,12 @@
 ;; as.hma — a WebAssembly assembler, written in Hot Glue.
 ;;
-;; Reads WAT text (the dialect stage 0 prints) on stdin. Writes a
-;; binary module on stdout. Runs under any WASI runtime:
+;; A WASI reactor: `run` reads WAT text (the dialect stage 0 prints)
+;; on stdin and writes a binary module on stdout, and the begin/in!/
+;; go/out byte protocol lets hotglue.wasm drive it as an imported
+;; module:
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/prelude.hma src/hotglue/as.hma > as.wat
-;;   wasmtime as.wat < program.wat > program.wasm
+;;   npx tsx src/hotglue/cli.ts src/hotglue/as.hma > as.wat
+;;   wasmtime run --invoke run as.wat < program.wat > program.wasm
 ;;
 ;; Self-hosting: as.wat assembles its own text, and the binary it
 ;; produces assembles it again, byte for byte.
@@ -303,6 +305,7 @@
       (2 "local.set" 33)
       (2 "local.tee" 34)
       (1 "i32.const" 65)
+      (1 "i64.const" 66)
       (5 "i32.load" 40)
       (6 "i32.load8_s" 44)
       (6 "i32.load8_u" 45)
@@ -801,7 +804,7 @@
       ($when (i32.eq (local.get $cls) (i32.const 0))
         (call $byte! (local.get $v) (local.get $k)))
       ($when (i32.eq (local.get $cls) (i32.const 1))
-        (call $byte! (local.get $v) (i32.const 65))
+        (call $byte! (local.get $v) (local.get $k))
         (call $sleb! (local.get $v) ($a (local.get $imm))))
       ($when (i32.eq (local.get $cls) (i32.const 2))
         (call $byte! (local.get $v) (local.get $k))
@@ -1129,10 +1132,34 @@
       (call $sec! (local.get $o) (i32.const 11) (call $data-sec (local.get $mod)))
       (local.get $o)))
 
-  (func (export "_start")
+  (func (export "run")
     (call $init)
     (call $read-all)
     ($let (($m (call $parse)) ($o (i32.const 0)))
       ($unless (call $his (local.get $m) "module") (call $die "module?"))
       (local.set $o (call $assemble (local.get $m)))
-      (call $write-all ($vp (local.get $o)) ($vl (local.get $o))))))
+      (call $write-all ($vp (local.get $o)) ($vl (local.get $o)))))
+
+  ;; The module-to-module protocol: another wasm module feeds WAT
+  ;; bytes in, runs the assembly, and pulls the binary out. Same
+  ;; organs, no stdio — this is how hotglue.wasm holds the assembler.
+  (func (export "begin") (param $n i32)
+    (call $init)
+    ($let (($v (call $vec-new (local.get $n))))
+      (i32.store (i32.const 24) ($vp (local.get $v)))
+      (i32.store (i32.const 28) (local.get $n))
+      (i32.store (i32.const 20) (i32.const 0))))
+
+  (func (export "in!") (param $i i32) (param $b i32)
+    (i32.store8 (i32.add (i32.load (i32.const 24)) (local.get $i)) (local.get $b)))
+
+  (func (export "go") (result i32)
+    ($let (($m (call $parse)) ($o (i32.const 0)))
+      ($unless (call $his (local.get $m) "module") (call $die "module?"))
+      (local.set $o (call $assemble (local.get $m)))
+      (i32.store (i32.const 65516) ($vp (local.get $o)))
+      (i32.store (i32.const 65520) ($vl (local.get $o)))
+      ($vl (local.get $o))))
+
+  (func (export "out") (param $i i32) (result i32)
+    (i32.load8_u (i32.add (i32.load (i32.const 65516)) (local.get $i)))))

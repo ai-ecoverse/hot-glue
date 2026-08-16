@@ -130,7 +130,7 @@ async function wasiInstance(mod, stdin) {
   return {
     inst,
     run() {
-      inst.exports._start();
+      (inst.exports.run || inst.exports._start)();
       const r = new Uint8Array(outs.reduce((a, b) => a + b.length, 0));
       let o = 0;
       for (const b of outs) { r.set(b, o); o += b.length; }

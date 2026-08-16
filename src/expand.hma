@@ -2,12 +2,15 @@
 ;;
 ;; Reads Hot Glue source (defmacros and a module) on stdin. Writes the
 ;; expanded, lowered, printed WAT on stdout — byte-identical to what
-;; stage 0 prints. Runs under any WASI runtime, and stays within the
-;; instruction subset as.hma assembles, so the toolchain can build
-;; itself without a text parser in sight:
+;; stage 0 prints. A WASI reactor: `run` is the stdin-to-stdout
+;; pipeline, and the begin/in!/go/out byte protocol lets hotglue.wasm
+;; drive it as an imported module. Stays within the instruction
+;; subset as.hma assembles, so the toolchain can build itself without
+;; a text parser in sight:
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/prelude.hma src/hotglue/expand.hma > expand.wat
-;;   cat src/hotglue/prelude.hma src/hotglue/expand.hma | wasmtime expand.wat > expand2.wat
+;;   npx tsx src/hotglue/cli.ts src/hotglue/expand.hma > expand.wat
+;;   # feed it its own resolved source; it prints the text it runs as
+;;   wasmtime run --invoke run expand.wat < resolved-expand.hma > expand2.wat
 ;;   diff expand.wat expand2.wat   ;; nothing
 ;;
 ;; Memory: 0 iovec, 8 io-count, 12 heap pointer, 16 nil, 20 cursor,
@@ -959,13 +962,11 @@
 
   ;; ----------------------------------------------------------- main
 
-  (func (export "_start")
+  (func $pipeline (result i32)
     ($let (($top-h (i32.const 0)) ($top-t (i32.const 0))
            ($out-h (i32.const 0)) ($out-t (i32.const 0))
            ($p (i32.const 0)) ($x (i32.const 0)) ($v (i32.const 0))
            ($first (i32.const 1)) ($g (i32.const 0)))
-      (call $init)
-      (call $read-all)
       (local.set $top-h ($nil))
       (call $skip)
       ($while (i32.lt_u ($pos) ($inlen))
@@ -994,4 +995,35 @@
         (call $print (local.get $v) (local.get $g) (i32.const 0))
         (local.set $p ($cdr (local.get $p))))
       (call $byte! (local.get $v) (i32.const 10))
-      (call $write-all ($vp (local.get $v)) ($vl (local.get $v))))))
+      (local.get $v)))
+
+  (func (export "run")
+    (call $init)
+    (call $read-all)
+    ($let (($v (call $pipeline)))
+      (call $write-all ($vp (local.get $v)) ($vl (local.get $v)))))
+
+  ;; The module-to-module protocol: another wasm module feeds source
+  ;; bytes in, runs the pipeline, and pulls the WAT bytes out. Same
+  ;; organs, no stdio — this is how hotglue.wasm holds the expander.
+  (func (export "begin") (param $n i32)
+    (call $init)
+    ($reg! (i32.const 0))
+    ($mark! (i32.const 0))
+    ($pool! (i32.const 0))
+    ($let (($v (call $vec-new (local.get $n))))
+      (i32.store (i32.const 24) ($vp (local.get $v)))
+      (i32.store (i32.const 28) (local.get $n))
+      (i32.store (i32.const 20) (i32.const 0))))
+
+  (func (export "in!") (param $i i32) (param $b i32)
+    (i32.store8 (i32.add (i32.load (i32.const 24)) (local.get $i)) (local.get $b)))
+
+  (func (export "go") (result i32)
+    ($let (($v (call $pipeline)))
+      (i32.store (i32.const 65516) ($vp (local.get $v)))
+      (i32.store (i32.const 65520) ($vl (local.get $v)))
+      ($vl (local.get $v))))
+
+  (func (export "out") (param $i i32) (result i32)
+    (i32.load8_u (i32.add (i32.load (i32.const 65516)) (local.get $i)))))

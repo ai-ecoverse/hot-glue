@@ -1,0 +1,328 @@
+;; hotglue.hma — the compiler is a wasm binary.
+;;
+;; Put the dependencies in the lookup path, run hotglue.wasm against
+;; a .hma file, get a .wasm back:
+;;
+;;   wasmtime --dir src/hotglue --dir examples \
+;;     --preload expand=expand.wasm --preload as=as.wasm \
+;;     hotglue.wasm gpt.hma > gpt.wasm
+;;
+;; The expander and the assembler arrive as explicitly imported wasm
+;; modules and are driven through their byte protocol: begin, in!,
+;; go, out. (use name.hma) forms resolve against the preopened
+;; directories — the --dir flags are the lookup path — with the same
+;; textual, byte-faithful splice as the bootstrap: top level only,
+;; once per name, comments and strings respected, everything else
+;; verbatim. No file this program touches arrives implicitly, and no
+;; stage of the flow is TypeScript. With no argument it reads stdin.
+;;
+;; Slots: 0/4 iovec, 8 io count, 12 heap top, 16/20 chunk head/tail,
+;; 24 seen list, 28 last read length. Pooled strings from 32. Heap
+;; from 65536.
+
+(use prelude.hma)
+
+(module
+  (type $t-v (func))
+  (type $t-i-v (func (param i32)))
+  (type $t-ii-v (func (param i32 i32)))
+  (type $t-i (func (result i32)))
+  (type $t-i-i (func (param i32) (result i32)))
+  (type $t-ii-i (func (param i32 i32) (result i32)))
+  (type $t-iii-i (func (param i32 i32 i32) (result i32)))
+  (type $t-iiii-i (func (param i32 i32 i32 i32) (result i32)))
+  (type $t-popen (func (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+
+  (import "wasi_snapshot_preview1" "args_sizes_get" (func $args_sizes_get (type $t-ii-i)))
+  (import "wasi_snapshot_preview1" "args_get" (func $args_get (type $t-ii-i)))
+  (import "wasi_snapshot_preview1" "path_open" (func $path_open (type $t-popen)))
+  (import "wasi_snapshot_preview1" "fd_read" (func $fd_read (type $t-iiii-i)))
+  (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (type $t-iiii-i)))
+  (import "wasi_snapshot_preview1" "fd_close" (func $fd_close (type $t-i-i)))
+  (import "expand" "begin" (func $x-begin (type $t-i-v)))
+  (import "expand" "in!" (func $x-in (type $t-ii-v)))
+  (import "expand" "go" (func $x-go (type $t-i)))
+  (import "expand" "out" (func $x-out (type $t-i-i)))
+  (import "as" "begin" (func $a-begin (type $t-i-v)))
+  (import "as" "in!" (func $a-in (type $t-ii-v)))
+  (import "as" "go" (func $a-go (type $t-i)))
+  (import "as" "out" (func $a-out (type $t-i-i)))
+  (memory (export "memory") 16)
+
+  ;; ------------------------------------------------------------- io
+
+  (func $die (type $t-ii-v) (param $p i32) (param $n i32)
+    (i32.store (i32.const 0) (local.get $p))
+    (i32.store (i32.const 4) (local.get $n))
+    (drop (call $fd_write (i32.const 2) (i32.const 0) (i32.const 1) (i32.const 8)))
+    (unreachable))
+
+  (func $write-all (type $t-ii-v) (param $p i32) (param $n i32)
+    ($while (i32.gt_u (local.get $n) (i32.const 0))
+      (i32.store (i32.const 0) (local.get $p))
+      (i32.store (i32.const 4) (local.get $n))
+      ($when (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8))
+        (call $die "write?"))
+      ($when (i32.eqz (i32.load (i32.const 8))) (call $die "write?"))
+      (local.set $p (i32.add (local.get $p) (i32.load (i32.const 8))))
+      (local.set $n (i32.sub (local.get $n) (i32.load (i32.const 8))))))
+
+  ;; ----------------------------------------------------------- heap
+
+  (func $ensure (type $t-i-v) (param $end i32)
+    ($while (i32.gt_u (local.get $end) (i32.mul (memory.size) (i32.const 65536)))
+      (drop (memory.grow (i32.const 16)))))
+
+  (func $alloc (type $t-i-i) (param $n i32) (result i32)
+    ($let (($p (i32.load (i32.const 12))))
+      (i32.store (i32.const 12)
+        (i32.and (i32.add (i32.add (local.get $p) (local.get $n)) (i32.const 3)) (i32.const -4)))
+      (call $ensure (i32.load (i32.const 12)))
+      (local.get $p)))
+
+  ;; Read everything an fd has into one contiguous run at the top of
+  ;; the heap. Returns the pointer; the length lands in slot 28.
+  (func $read-fd (type $t-i-i) (param $fd i32) (result i32)
+    ($let (($p0 (i32.load (i32.const 12))))
+      (block $done
+        (loop $more
+          (call $ensure (i32.add (i32.load (i32.const 12)) (i32.const 65536)))
+          (i32.store (i32.const 0) (i32.load (i32.const 12)))
+          (i32.store (i32.const 4) (i32.const 65536))
+          ($when (call $fd_read (local.get $fd) (i32.const 0) (i32.const 1) (i32.const 8))
+            (call $die "read?"))
+          (br_if $done (i32.eqz (i32.load (i32.const 8))))
+          (i32.store (i32.const 12) (i32.add (i32.load (i32.const 12)) (i32.load (i32.const 8))))
+          (br $more)))
+      (i32.store (i32.const 28) (i32.sub (i32.load (i32.const 12)) (local.get $p0)))
+      (i32.store (i32.const 12)
+        (i32.and (i32.add (i32.load (i32.const 12)) (i32.const 3)) (i32.const -4)))
+      (local.get $p0)))
+
+  ;; Try each preopened directory in order — the lookup path is
+  ;; exactly the --dir flags, in the order they were given.
+  (func $open (type $t-ii-i) (param $p i32) (param $n i32) (result i32)
+    ($let (($fd (i32.const 3)))
+      ($while (i32.lt_u (local.get $fd) (i32.const 10))
+        ;; rights: fd_read | fd_seek | fd_tell | fd_filestat_get
+        ($when (i32.eqz (call $path_open (local.get $fd) (i32.const 1)
+                          (local.get $p) (local.get $n) (i32.const 0)
+                          (i64.const 2097190) (i64.const 0) (i32.const 0) (i32.const 8)))
+          (return (i32.load (i32.const 8))))
+        ($inc! $fd 1))
+      (i32.const -1)))
+
+  ;; ------------------------------------------- the seen-names list
+
+  (func $memeq (type $t-iii-i) (param $a i32) (param $b i32) (param $n i32) (result i32)
+    ($let (($i (i32.const 0)))
+      ($while (i32.lt_u (local.get $i) (local.get $n))
+        ($when (i32.ne (i32.load8_u (i32.add (local.get $a) (local.get $i)))
+                       (i32.load8_u (i32.add (local.get $b) (local.get $i))))
+          (return (i32.const 0)))
+        ($inc! $i 1))
+      (i32.const 1)))
+
+  (func $seen? (type $t-ii-i) (param $p i32) (param $n i32) (result i32)
+    ($let (($c (i32.load (i32.const 24))))
+      ($while (local.get $c)
+        ($when ($and (i32.eq (i32.load (i32.add (local.get $c) (i32.const 4))) (local.get $n))
+                     (call $memeq (i32.load (local.get $c)) (local.get $p) (local.get $n)))
+          (return (i32.const 1)))
+        (local.set $c (i32.load (i32.add (local.get $c) (i32.const 8)))))
+      (i32.const 0)))
+
+  (func $seen! (type $t-ii-v) (param $p i32) (param $n i32)
+    ($let (($c (call $alloc (i32.const 12))))
+      (i32.store (local.get $c) (local.get $p))
+      (i32.store (i32.add (local.get $c) (i32.const 4)) (local.get $n))
+      (i32.store (i32.add (local.get $c) (i32.const 8)) (i32.load (i32.const 24)))
+      (i32.store (i32.const 24) (local.get $c))))
+
+  ;; -------------------------------------------- the resolved stream
+  ;;
+  ;; Resolution never copies text: it appends (pointer, length) chunks
+  ;; that alias the loaded files, in splice order.
+
+  (func $chunk! (type $t-ii-v) (param $p i32) (param $n i32)
+    ($when (i32.eqz (local.get $n)) (return))
+    ($let (($c (call $alloc (i32.const 12))))
+      (i32.store (local.get $c) (local.get $p))
+      (i32.store (i32.add (local.get $c) (i32.const 4)) (local.get $n))
+      (i32.store (i32.add (local.get $c) (i32.const 8)) (i32.const 0))
+      ($when (i32.load (i32.const 20))
+        (i32.store (i32.add (i32.load (i32.const 20)) (i32.const 8)) (local.get $c)))
+      ($unless (i32.load (i32.const 16)) (i32.store (i32.const 16) (local.get $c)))
+      (i32.store (i32.const 20) (local.get $c))))
+
+  (func $ws? (type $t-i-i) (param $c i32) (result i32)
+    ($or (i32.eq (local.get $c) (i32.const 32))
+         ($or (i32.eq (local.get $c) (i32.const 10))
+              ($or (i32.eq (local.get $c) (i32.const 9))
+                   (i32.eq (local.get $c) (i32.const 13))))))
+
+  ;; The same state machine as the bootstrap's resolveUses — keep
+  ;; them in lockstep, byte for byte.
+  (func $resolve (type $t-ii-v) (param $s i32) (param $len i32)
+    ($let (($i (i32.const 0)) ($start (i32.const 0)) ($depth (i32.const 0))
+           ($c (i32.const 0)) ($close (i32.const 0)) ($np (i32.const 0))
+           ($ne (i32.const 0)) ($fd (i32.const 0)) ($fp (i32.const 0)))
+      (block $done
+        (loop $step
+          (br_if $done (i32.ge_u (local.get $i) (local.get $len)))
+          (block $next
+            (local.set $c (i32.load8_u (i32.add (local.get $s) (local.get $i))))
+            ;; ;; line comment — pass through, but blind to its bytes
+            ($when ($and (i32.eq (local.get $c) (i32.const 59))
+                         ($and (i32.lt_u (i32.add (local.get $i) (i32.const 1)) (local.get $len))
+                               (i32.eq (i32.load8_u (i32.add (i32.add (local.get $s) (local.get $i)) (i32.const 1)))
+                                       (i32.const 59))))
+              ($while ($and (i32.lt_u (local.get $i) (local.get $len))
+                            (i32.ne (i32.load8_u (i32.add (local.get $s) (local.get $i))) (i32.const 10)))
+                ($inc! $i 1))
+              (br $next))
+            ;; (; block comment ;)
+            ($when ($and (i32.eq (local.get $c) (i32.const 40))
+                         ($and (i32.lt_u (i32.add (local.get $i) (i32.const 1)) (local.get $len))
+                               (i32.eq (i32.load8_u (i32.add (i32.add (local.get $s) (local.get $i)) (i32.const 1)))
+                                       (i32.const 59))))
+              (block $closed
+                ($while (i32.lt_u (i32.add (local.get $i) (i32.const 1)) (local.get $len))
+                  ($when ($and (i32.eq (i32.load8_u (i32.add (local.get $s) (local.get $i))) (i32.const 59))
+                               (i32.eq (i32.load8_u (i32.add (i32.add (local.get $s) (local.get $i)) (i32.const 1)))
+                                       (i32.const 41)))
+                    (local.set $i (i32.add (local.get $i) (i32.const 2)))
+                    (br $closed))
+                  ($inc! $i 1))
+                (local.set $i (local.get $len)))
+              (br $next))
+            ;; "string" — backslash escapes respected
+            ($when (i32.eq (local.get $c) (i32.const 34))
+              ($inc! $i 1)
+              ($while ($and (i32.lt_u (local.get $i) (local.get $len))
+                            (i32.ne (i32.load8_u (i32.add (local.get $s) (local.get $i))) (i32.const 34)))
+                (local.set $i (i32.add (local.get $i)
+                  ($cond ((i32.eq (i32.load8_u (i32.add (local.get $s) (local.get $i))) (i32.const 92))
+                          (i32.const 2))
+                         (else (i32.const 1))))))
+              ($when (i32.lt_u (local.get $i) (local.get $len)) ($inc! $i 1))
+              ($when (i32.gt_u (local.get $i) (local.get $len)) (local.set $i (local.get $len)))
+              (br $next))
+            ;; (use name.hma) — top level only
+            ($when ($and (i32.eq (local.get $c) (i32.const 40))
+                    ($and (i32.eqz (local.get $depth))
+                     ($and (i32.lt_u (i32.add (local.get $i) (i32.const 4)) (local.get $len))
+                      ($and (i32.eq (i32.load8_u (i32.add (i32.add (local.get $s) (local.get $i)) (i32.const 1))) (i32.const 117))
+                       ($and (i32.eq (i32.load8_u (i32.add (i32.add (local.get $s) (local.get $i)) (i32.const 2))) (i32.const 115))
+                        ($and (i32.eq (i32.load8_u (i32.add (i32.add (local.get $s) (local.get $i)) (i32.const 3))) (i32.const 101))
+                              (call $ws? (i32.load8_u (i32.add (i32.add (local.get $s) (local.get $i)) (i32.const 4))))))))))
+              (call $chunk! (i32.add (local.get $s) (local.get $start))
+                            (i32.sub (local.get $i) (local.get $start)))
+              (local.set $close (local.get $i))
+              ($while ($and (i32.lt_u (local.get $close) (local.get $len))
+                            (i32.ne (i32.load8_u (i32.add (local.get $s) (local.get $close))) (i32.const 41)))
+                ($inc! $close 1))
+              ($when (i32.ge_u (local.get $close) (local.get $len)) (call $die "use?"))
+              (local.set $np (i32.add (local.get $i) (i32.const 4)))
+              ($while (call $ws? (i32.load8_u (i32.add (local.get $s) (local.get $np))))
+                ($inc! $np 1))
+              (local.set $ne (local.get $close))
+              ($while ($and (i32.gt_u (local.get $ne) (local.get $np))
+                            (call $ws? (i32.load8_u (i32.add (i32.add (local.get $s) (local.get $ne)) (i32.const -1)))))
+                (local.set $ne (i32.sub (local.get $ne) (i32.const 1))))
+              (local.set $i (i32.add (local.get $close) (i32.const 1)))
+              (local.set $start (local.get $i))
+              ($unless (call $seen? (i32.add (local.get $s) (local.get $np))
+                                    (i32.sub (local.get $ne) (local.get $np)))
+                (call $seen! (i32.add (local.get $s) (local.get $np))
+                             (i32.sub (local.get $ne) (local.get $np)))
+                (local.set $fd (call $open (i32.add (local.get $s) (local.get $np))
+                                          (i32.sub (local.get $ne) (local.get $np))))
+                ($when (i32.eq (local.get $fd) (i32.const -1))
+                  (call $write-all (i32.add (local.get $s) (local.get $np))
+                                   (i32.sub (local.get $ne) (local.get $np)))
+                  (call $die " not in the lookup path\n"))
+                (local.set $fp (call $read-fd (local.get $fd)))
+                (drop (call $fd_close (local.get $fd)))
+                (call $resolve (local.get $fp) (i32.load (i32.const 28))))
+              (br $next))
+            ($when (i32.eq (local.get $c) (i32.const 40)) ($inc! $depth 1))
+            ($when (i32.eq (local.get $c) (i32.const 41)) ($inc! $depth -1))
+            ($inc! $i 1))
+          (br $step)))
+      (call $chunk! (i32.add (local.get $s) (local.get $start))
+                    (i32.sub (local.get $len) (local.get $start)))))
+
+  ;; ----------------------------------------------------------- main
+
+  (func (export "_start") (type $t-v)
+    ($let (($argc (i32.const 0)) ($argv (i32.const 0)) ($buf (i32.const 0))
+           ($sp (i32.const 0)) ($sl (i32.const 0)) ($fd (i32.const 0))
+           ($p (i32.const 0)) ($n (i32.const 0)) ($c (i32.const 0))
+           ($total (i32.const 0)) ($idx (i32.const 0)) ($j (i32.const 0))
+           ($wlen (i32.const 0)) ($blen (i32.const 0)) ($off (i32.const 0))
+           ($m (i32.const 0)) ($outp (i32.const 0)))
+      (i32.store (i32.const 12) (i32.const 65536))
+      (i32.store (i32.const 16) (i32.const 0))
+      (i32.store (i32.const 20) (i32.const 0))
+      (i32.store (i32.const 24) (i32.const 0))
+      ;; the entry: argv[1] opened on the lookup path, or stdin
+      ($when (call $args_sizes_get (i32.const 0) (i32.const 4)) (call $die "args?"))
+      (local.set $argc (i32.load (i32.const 0)))
+      (if (i32.ge_u (local.get $argc) (i32.const 2))
+        (then
+          (local.set $argv (call $alloc (i32.mul (local.get $argc) (i32.const 4))))
+          (local.set $buf (call $alloc (i32.load (i32.const 4))))
+          ($when (call $args_get (local.get $argv) (local.get $buf)) (call $die "args?"))
+          (local.set $p (i32.load (i32.add (local.get $argv) (i32.const 4))))
+          ($while (i32.load8_u (i32.add (local.get $p) (local.get $n)))
+            ($inc! $n 1))
+          (local.set $fd (call $open (local.get $p) (local.get $n)))
+          ($when (i32.eq (local.get $fd) (i32.const -1))
+            (call $write-all (local.get $p) (local.get $n))
+            (call $die " not in the lookup path\n"))
+          (local.set $sp (call $read-fd (local.get $fd)))
+          (drop (call $fd_close (local.get $fd)))
+          (local.set $sl (i32.load (i32.const 28))))
+        (else
+          (local.set $sp (call $read-fd (i32.const 0)))
+          (local.set $sl (i32.load (i32.const 28)))))
+      ;; resolve imports into the chunk stream
+      (call $resolve (local.get $sp) (local.get $sl))
+      ;; source → expander
+      (local.set $c (i32.load (i32.const 16)))
+      ($while (local.get $c)
+        (local.set $total (i32.add (local.get $total) (i32.load (i32.add (local.get $c) (i32.const 4)))))
+        (local.set $c (i32.load (i32.add (local.get $c) (i32.const 8)))))
+      (call $x-begin (local.get $total))
+      (local.set $c (i32.load (i32.const 16)))
+      ($while (local.get $c)
+        (local.set $p (i32.load (local.get $c)))
+        (local.set $n (i32.load (i32.add (local.get $c) (i32.const 4))))
+        (local.set $j (i32.const 0))
+        ($while (i32.lt_u (local.get $j) (local.get $n))
+          (call $x-in (local.get $idx) (i32.load8_u (i32.add (local.get $p) (local.get $j))))
+          ($inc! $idx 1)
+          ($inc! $j 1))
+        (local.set $c (i32.load (i32.add (local.get $c) (i32.const 8)))))
+      (local.set $wlen (call $x-go))
+      ;; WAT → assembler
+      (call $a-begin (local.get $wlen))
+      (local.set $j (i32.const 0))
+      ($while (i32.lt_u (local.get $j) (local.get $wlen))
+        (call $a-in (local.get $j) (call $x-out (local.get $j)))
+        ($inc! $j 1))
+      (local.set $blen (call $a-go))
+      ;; binary → stdout
+      (local.set $outp (call $alloc (i32.const 65536)))
+      ($while (i32.lt_u (local.get $off) (local.get $blen))
+        (local.set $m (i32.sub (local.get $blen) (local.get $off)))
+        ($when (i32.gt_u (local.get $m) (i32.const 65536)) (local.set $m (i32.const 65536)))
+        (local.set $j (i32.const 0))
+        ($while (i32.lt_u (local.get $j) (local.get $m))
+          (i32.store8 (i32.add (local.get $outp) (local.get $j))
+                      (call $a-out (i32.add (local.get $off) (local.get $j))))
+          ($inc! $j 1))
+        (call $write-all (local.get $outp) (local.get $m))
+        (local.set $off (i32.add (local.get $off) (local.get $m))))))
+  )
