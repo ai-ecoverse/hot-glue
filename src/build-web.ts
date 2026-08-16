@@ -36,6 +36,7 @@ export function buildPage(root = '.'): string {
   page = fill(page, '__INTEROP__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/interop.nacre')));
   page = fill(page, '__MANDELBROT__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/mandelbrot.nacre')));
   page = fill(page, '__MANDELZOOM__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/mandelzoom.nacre')));
+  page = fill(page, '__DEEPZOOM__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/deepzoom.nacre')));
   const out = p('web', 'playground.html');
   writeFileSync(out, page);
   return out;

@@ -31,7 +31,7 @@
   <p>everything runs in this tab — the expander and the assembler are WebAssembly modules that built each other; the C and Rust guests were compiled from the wilderness</p>
 </header>
 <div class="bar">
-  <select id="example"><option>fizzbuzz</option><option>gc-ast</option><option>clojure</option><option>interop</option><option>mandelbrot</option><option>mandelzoom</option></select>
+  <select id="example"><option>fizzbuzz</option><option>gc-ast</option><option>clojure</option><option>interop</option><option>mandelbrot</option><option>mandelzoom</option><option>deepzoom</option></select>
   <button id="run">expand · assemble · run</button>
   <span class="status" id="status"></span>
 </div>
@@ -52,6 +52,7 @@ const EXAMPLES = {
   "interop": __INTEROP__,
   "mandelbrot": __MANDELBROT__,
   "mandelzoom": __MANDELZOOM__,
+  "deepzoom": __DEEPZOOM__,
 };
 
 const $ = (id) => document.getElementById(id);

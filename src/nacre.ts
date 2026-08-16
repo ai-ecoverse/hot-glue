@@ -89,8 +89,12 @@ export function read(src: string): Node[] {
     if (j === i) die(`unexpected ${src[i]}`);
     const t = src.slice(i, j);
     i = j;
-    const n = Number(t);
-    return Number.isNaN(n) ? new Sym(t) : n;
+    // Only plain integers become numbers. Float-looking tokens stay
+    // symbols and travel as text: hygiene never looks inside them,
+    // and the assembler alone mints their IEEE bits. This keeps all
+    // three expanders byte-identical without teaching two of them
+    // to print doubles the way JavaScript does.
+    return /^-?\d+$/.test(t) ? Number(t) : new Sym(t);
   };
   const forms: Node[] = [];
   while ((skip(), i < src.length)) forms.push(form());
