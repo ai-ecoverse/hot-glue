@@ -34,7 +34,14 @@
           (br $more)))
       (local.get $n)))
 
+  ;; slot 16 is the output cursor: 0 means stdout, else append there
   (func $put (param $ptr i32) (param $len i32)
+    (when (i32.load (i32.const 16))
+      (while (> (+ (+ (i32.load (i32.const 16)) (local.get $len)) 65536) (* (memory.size) 65536))
+        (drop (memory.grow (num 16))))
+      (memory.copy (i32.load (i32.const 16)) (local.get $ptr) (local.get $len))
+      (i32.store (i32.const 16) (+ (i32.load (i32.const 16)) (local.get $len)))
+      (return))
     (while (> (local.get $len) 0)
       (i32.store (i32.const 0) (local.get $ptr))
       (i32.store (i32.const 4) (local.get $len))
@@ -46,9 +53,9 @@
   (func $blit (param $dst i32) (param $src i32) (param $len i32)
     (memory.copy (local.get $dst) (local.get $src) (local.get $len)))
 
-  (func (export "_start")
+  (func $pipeline (param $bytes i32)
     (local $s f32)
-    (let [$bytes (call $read-all) $count 0 $data 0 $in 0 $out 0 $i 0 $v 0]
+    (let [$count 0 $data 0 $in 0 $out 0 $i 0 $v 0]
       (local.set $count (quot (local.get $bytes) 4))
       (local.set $data (* 2 (local.get $count)))
       ;; the canonical forty-four bytes, built at 128
@@ -77,4 +84,30 @@
         (i32.store16 (+ (local.get $out) (* 2 (local.get $i))) (local.get $v))
         (local.set $i (inc (local.get $i))))
       (call $put (num 128) (num 44))
-      (call $put (local.get $out) (local.get $data)))))
+      (call $put (local.get $out) (local.get $data))))
+
+  (func (export "_start")
+    (i32.store (i32.const 16) (num 0))
+    (call $pipeline (call $read-all)))
+
+  ;; the byte protocol, so a film can hold this filter as an
+  ;; imported module: begin, in!, go, out — same as the organs
+  (func (export "begin") (param $n i32)
+    (while (> (+ (+ 4096 (local.get $n)) 65536) (* (memory.size) 65536))
+      (drop (memory.grow (num 16))))
+    (i32.store (i32.const 24) (local.get $n)))
+
+  (func (export "in!") (param $i i32) (param $b i32)
+    (i32.store8 (+ 4096 (local.get $i)) (local.get $b)))
+
+  (func (export "go") (result i32)
+    (let [$base (+ (+ (+ 4096 (i32.load (i32.const 24)))
+                      (quot (i32.load (i32.const 24)) 2))
+                   64)]
+      (i32.store (i32.const 16) (local.get $base))
+      (i32.store (i32.const 20) (local.get $base))
+      (call $pipeline (i32.load (i32.const 24)))
+      (- (i32.load (i32.const 16)) (i32.load (i32.const 20)))))
+
+  (func (export "out") (param $i i32) (result i32)
+    (i32.load8_u (+ (i32.load (i32.const 20)) (local.get $i)))))

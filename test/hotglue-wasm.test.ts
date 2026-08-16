@@ -70,6 +70,7 @@ describe.skipIf(!runtime)('hotglue.wasm — the compiler is a wasm binary', () =
   it('resolves (use …) from the preopened lookup path, byte-identically to the bootstrap', () => {
     expect(driver('collatz.hma').equals(bootstrap('examples/collatz.hma'))).toBe(true);
     expect(driver('gpt.hma').equals(bootstrap('examples/gpt.hma'))).toBe(true);
+    expect(driver('film.hma').equals(bootstrap('examples/film.hma'))).toBe(true);
   });
 
   it('reads stdin when given no entry', () => {

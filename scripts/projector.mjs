@@ -1,0 +1,117 @@
+#!/usr/bin/env node
+// projector.mjs — a lamp, not a reader.
+//
+// It satisfies a film's imports and never looks inside an .hma. The
+// film arrives as a wasm binary compiled by hotglue.wasm; its import
+// section is the manifest. Namespace "host" gets the four
+// capabilities a sandbox cannot self-supply — perl (zeroperl), speak
+// (Kokoro in Chromium), gpu (WebGPU in Chromium), cut (ffmpeg.wasm)
+// — each running as its own sandboxed subprocess. Any other
+// namespace ending in .hma is a filter, compiled on demand with the
+// published hotglue.wasm flow and instantiated once, exactly as
+// wasmtime satisfies a --preload.
+//
+//   node scripts/projector.mjs film.wasm [--preload NS=file.wasm]...
+//   HOTGLUE_DIST=dist/hotglue   where the bootstrap artifacts live
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const args = process.argv.slice(2);
+const filmPath = args.find((a) => !a.startsWith('--'));
+const preloads = new Map();
+for (let i = 0; i < args.length; i++)
+  if (args[i] === '--preload') preloads.set(...args[++i].split('='));
+
+const wasmtime = (() => {
+  for (const bin of ['wasmtime', join(homedir(), '.local/bin/wasmtime')]) {
+    try {
+      execFileSync(bin, ['--version'], { stdio: 'pipe' });
+      return bin;
+    } catch {
+      /* keep looking */
+    }
+  }
+  throw new Error('the projector needs wasmtime for filter compilation');
+})();
+const dist = process.env.HOTGLUE_DIST ?? 'dist/hotglue';
+const dir = mkdtempSync(join(tmpdir(), 'projector-'));
+
+const filmMod = new WebAssembly.Module(readFileSync(filmPath));
+
+function moduleFor(ns) {
+  if (preloads.has(ns)) return new WebAssembly.Module(readFileSync(preloads.get(ns)));
+  if (!ns.endsWith('.hma')) throw new Error(`projector: no module for import namespace ${ns}`);
+  const bin = execFileSync(
+    wasmtime,
+    ['--dir', 'src/hotglue', '--dir', 'examples', '--dir', '.',
+     '--preload', `expand=${dist}/expand.wasm`, '--preload', `as=${dist}/as.wasm`,
+     `${dist}/hotglue.wasm`, ns],
+    { maxBuffer: 1 << 26 },
+  );
+  return new WebAssembly.Module(bin);
+}
+
+const stub = { wasi_snapshot_preview1: { fd_read: () => 8, fd_write: () => 8 } };
+let film;
+const mem = () => new Uint8Array(film.exports.memory.buffer);
+const str = (p, n) => Buffer.from(mem().slice(p, p + n)).toString('utf8');
+const run = (cmd, a, env = {}) =>
+  execFileSync(cmd, a, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'inherit'], maxBuffer: 1 << 28 });
+
+let pending = Buffer.alloc(0);
+const inputs = [];
+
+const host = {
+  perl(pp, pl) {
+    pending = run('node', ['scripts/zeroperl-run.mjs', str(pp, pl)]);
+    console.log(`  perl wrote ${pending.length} characters in the sandbox`);
+    return pending.length;
+  },
+  speak(tp, tl, vp, vl) {
+    const out = join(dir, 'voice.f32');
+    run('node', ['scripts/kokoro-voice.mjs'], {
+      TEXT: str(tp, tl), VOICE: str(vp, vl), OUT: out,
+      KOKORO_MIRROR: process.env.KOKORO_MIRROR ?? 'models/kokoro' });
+    pending = readFileSync(out);
+    console.log(`  kokoro spoke ${(pending.length / 4 / 24000).toFixed(1)}s in the sandbox`);
+    return pending.length;
+  },
+  gpu(sp, sl, frames) {
+    const out = join(dir, 'frames.rgb');
+    run('node', ['scripts/gpu-render.mjs'], { SHADER: str(sp, sl), FRAMES: String(frames), OUT: out });
+    pending = readFileSync(out);
+    console.log(`  webgpu rendered ${pending.length / 196608} frames`);
+    return pending.length;
+  },
+  take(dst) {
+    const need = dst + pending.length - film.exports.memory.buffer.byteLength;
+    if (need > 0) film.exports.memory.grow(Math.ceil(need / 65536));
+    mem().set(pending, dst);
+    pending = Buffer.alloc(0);
+  },
+  input(p, n, loop) {
+    inputs.push({ bytes: Buffer.from(mem().slice(p, p + n)), loop: !!loop });
+  },
+  cut(pp, pl) {
+    const out = str(pp, pl);
+    const specs = inputs.map((inp, i) => {
+      const file = join(dir, inp.bytes.subarray(0, 4).toString() === 'RIFF' ? `${i}.wav` : `${i}.y4m`);
+      writeFileSync(file, inp.bytes);
+      return inp.loop ? `${file}:loop` : file;
+    });
+    run('node', ['scripts/ffmpeg-cut.mjs', out, ...specs]);
+    console.log(`  ffmpeg.wasm cut ${out}`);
+  },
+};
+
+const imports = { host };
+for (const imp of WebAssembly.Module.imports(filmMod))
+  if (imp.module !== 'host' && !imports[imp.module])
+    imports[imp.module] = new WebAssembly.Instance(moduleFor(imp.module), stub).exports;
+
+console.log(`projector: ${filmPath}`);
+film = new WebAssembly.Instance(filmMod, imports);
+film.exports._start();
+process.exit(0);
