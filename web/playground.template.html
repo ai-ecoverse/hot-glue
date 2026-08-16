@@ -22,40 +22,58 @@
   .pane { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
   .pane h2 { font-size: .7rem; letter-spacing: .15em; color: var(--dim); padding: .5rem .8rem; border-bottom: 1px solid var(--edge); font-weight: normal; text-transform: uppercase; }
   textarea, pre { flex: 1; background: none; color: inherit; border: 0; padding: .8rem; font: inherit; font-size: .78rem; overflow: auto; white-space: pre; resize: none; outline: none; }
+  #canvas { margin: .8rem; image-rendering: pixelated; max-width: calc(100% - 1.6rem); border-radius: 4px; }
 </style>
 </head>
 <body>
 <header>
   <h1>nacre <span class="pearl">⌾</span> playground</h1>
-  <p>everything runs in this tab — the expander and the assembler below are WebAssembly modules that built each other</p>
+  <p>everything runs in this tab — the expander and the assembler are WebAssembly modules that built each other; the C and Rust guests were compiled from the wilderness</p>
 </header>
 <div class="bar">
-  <select id="example"><option>fizzbuzz</option><option>gc-ast</option><option>clojure</option></select>
+  <select id="example"><option>fizzbuzz</option><option>gc-ast</option><option>clojure</option><option>interop</option><option>mandelbrot</option></select>
   <button id="run">expand · assemble · run</button>
   <span class="status" id="status"></span>
 </div>
 <div class="panes">
   <div class="pane"><h2>nacre source</h2><textarea id="src" spellcheck="false"></textarea></div>
   <div class="pane"><h2>expanded wat</h2><pre id="wat"></pre></div>
-  <div class="pane"><h2>output</h2><pre id="out"></pre></div>
+  <div class="pane"><h2>output</h2><pre id="out"></pre><canvas id="canvas" hidden></canvas></div>
 </div>
 <script>
 const EXPAND_B64 = "__EXPAND_B64__";
 const AS_B64 = "__AS_B64__";
-const EXAMPLES = { "fizzbuzz": __FIZZBUZZ__, "gc-ast": __GC_AST__, "clojure": __CLJ__ };
+const C_B64 = "__C_B64__";
+const RUST_B64 = "__RUST_B64__";
+const EXAMPLES = {
+  "fizzbuzz": __FIZZBUZZ__,
+  "gc-ast": __GC_AST__,
+  "clojure": __CLJ__,
+  "interop": __INTEROP__,
+  "mandelbrot": __MANDELBROT__,
+};
 
 const $ = (id) => document.getElementById(id);
 const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const enc = new TextEncoder(), dec = new TextDecoder();
 
-let expandMod, asMod;
+let expandMod, asMod, nativeNs;
 
-async function runWasi(mod, stdin) {
+async function natives() {
+  if (nativeNs) return nativeNs;
+  nativeNs = {};
+  if (C_B64) nativeNs.c = (await WebAssembly.instantiate(await WebAssembly.compile(b64(C_B64)), {})).exports;
+  if (RUST_B64) nativeNs.rust = (await WebAssembly.instantiate(await WebAssembly.compile(b64(RUST_B64)), {})).exports;
+  return nativeNs;
+}
+
+// instantiate with a WASI shim and the native guests; run() drives _start
+async function wasiInstance(mod, stdin) {
   const outs = [];
   let pos = 0, inst;
   const dv = () => new DataView(inst.exports.memory.buffer);
   const u8 = () => new Uint8Array(inst.exports.memory.buffer);
-  inst = await WebAssembly.instantiate(mod, {
+  const imports = Object.assign({
     wasi_snapshot_preview1: {
       fd_read(fd, iovs, cnt, pn) {
         const base = dv().getUint32(iovs, true), len = dv().getUint32(iovs + 4, true);
@@ -72,30 +90,57 @@ async function runWasi(mod, stdin) {
         return 0;
       },
     },
-  });
-  inst.exports._start();
-  const r = new Uint8Array(outs.reduce((a, b) => a + b.length, 0));
-  let o = 0;
-  for (const b of outs) { r.set(b, o); o += b.length; }
-  return r;
+  }, await natives());
+  inst = await WebAssembly.instantiate(mod, imports);
+  return {
+    inst,
+    run() {
+      inst.exports._start();
+      const r = new Uint8Array(outs.reduce((a, b) => a + b.length, 0));
+      let o = 0;
+      for (const b of outs) { r.set(b, o); o += b.length; }
+      return r;
+    },
+  };
 }
 
 async function run() {
   const status = $("status");
+  const canvas = $("canvas");
+  canvas.hidden = true;
   try {
     status.textContent = "expanding…";
     expandMod ??= await WebAssembly.compile(b64(EXPAND_B64));
     asMod ??= await WebAssembly.compile(b64(AS_B64));
-    const wat = await runWasi(expandMod, enc.encode($("src").value));
+    const wat = (await wasiInstance(expandMod, enc.encode($("src").value))).run();
     $("wat").textContent = dec.decode(wat);
     status.textContent = "assembling…";
-    const bin = await runWasi(asMod, wat);
+    const bin = (await wasiInstance(asMod, wat)).run();
     status.textContent = "running…";
     const mod = await WebAssembly.compile(bin);
-    if (WebAssembly.Module.exports(mod).some((e) => e.name === "_start")) {
-      $("out").textContent = dec.decode(await runWasi(mod, new Uint8Array(0)));
+    const names = WebAssembly.Module.exports(mod).map((e) => e.name);
+    if (names.includes("render") && names.includes("width")) {
+      const { inst } = await wasiInstance(mod, new Uint8Array(0));
+      const ptr = inst.exports.render();
+      const w = inst.exports.width(), h = inst.exports.height();
+      const rgb = new Uint8Array(inst.exports.memory.buffer, ptr, w * h * 3);
+      canvas.width = w;
+      canvas.height = h;
+      canvas.hidden = false;
+      const ctx = canvas.getContext("2d");
+      const img = ctx.createImageData(w, h);
+      for (let i = 0, j = 0; i < w * h; i++) {
+        img.data[i * 4] = rgb[j++];
+        img.data[i * 4 + 1] = rgb[j++];
+        img.data[i * 4 + 2] = rgb[j++];
+        img.data[i * 4 + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      $("out").textContent = "rendered " + w + "×" + h + " into this tab's own canvas";
+    } else if (names.includes("_start")) {
+      $("out").textContent = dec.decode((await wasiInstance(mod, new Uint8Array(0))).run());
     } else {
-      const inst = await WebAssembly.instantiate(mod, {});
+      const { inst } = await wasiInstance(mod, new Uint8Array(0));
       const lines = [];
       for (const [name, fn] of Object.entries(inst.exports))
         if (typeof fn === "function") lines.push(name + "() = " + fn());
@@ -112,6 +157,7 @@ $("example").onchange = () => {
   $("src").value = EXAMPLES[$("example").value];
   $("wat").textContent = "";
   $("out").textContent = "";
+  $("canvas").hidden = true;
 };
 $("run").onclick = run;
 $("src").value = EXAMPLES["fizzbuzz"];

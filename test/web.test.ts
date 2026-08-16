@@ -41,10 +41,34 @@ describe('the browser as expansion host', () => {
           undefined,
           { timeout: 60000 },
         );
+        // the wilderness: C and Rust guests answer from inside the tab
+        await page.selectOption('#example', 'interop');
+        await page.click('#run');
+        await page.waitForFunction(
+          "document.getElementById('out').textContent.includes('crc32 by C:    cf894783')",
+          undefined,
+          { timeout: 60000 },
+        );
+        // and the set appears on the canvas
+        await page.selectOption('#example', 'mandelbrot');
+        await page.click('#run');
+        await page.waitForFunction(
+          "!document.getElementById('canvas').hidden",
+          undefined,
+          { timeout: 120000 },
+        );
+        const pixels = await page.evaluate(`(() => {
+          const ctx = document.getElementById('canvas').getContext('2d');
+          const c = ctx.getImageData(128, 128, 1, 1).data;
+          const e = ctx.getImageData(0, 0, 1, 1).data;
+          return [c[0], c[1], c[2], e[0]];
+        })()`);
+        expect(pixels.slice(0, 3)).toEqual([0, 0, 0]); // the center is in the set
+        expect(pixels[3]).toBeGreaterThan(0); // the corner escapes
       } finally {
         await browser.close();
       }
     },
-    180000,
+    240000,
   );
 });

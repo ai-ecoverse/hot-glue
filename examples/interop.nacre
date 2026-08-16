@@ -1,0 +1,57 @@
+;; interop.nacre — a Lisp walks into the binary wilderness.
+;;
+;; The checksum is computed by zlib's CRC-32 algorithm, compiled from
+;; C. The mixing is MurmurHash3's finalizer, compiled from Rust. Each
+;; lives in its own module with its own memory; nacre feeds the C
+;; module byte by byte across the boundary and threads the result
+;; through the Rust one. Three languages, three modules, one stack.
+;;
+;;   npx tsx src/nacre/cli.ts src/nacre/clj.nacre examples/interop.nacre > interop.wat
+;;   wasmtime run --preload c=examples/native/crc32.wasm \
+;;                --preload rust=examples/native/fmix.wasm interop.wat
+
+(module
+  (import "c" "poke" (func $poke (param i32 i32)))
+  (import "c" "crc32" (func $crc32 (param i32) (result i32)))
+  (import "rust" "fmix32" (func $fmix32 (param i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_write"
+    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 1)
+
+  (func $print (param $ptr i32) (param $len i32)
+    (i32.store (i32.const 0) (local.get $ptr))
+    (i32.store (i32.const 4) (local.get $len))
+    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8))))
+
+  (func $hex-digit (param $d i32) (result i32)
+    ($if (< (local.get $d) 10)
+         (+ (local.get $d) 48)
+         (+ (local.get $d) 87)))
+
+  (func $print-hex (param $v i32)
+    (let [$i 0]
+      (while (< (local.get $i) 8)
+        (i32.store8 (+ 16 (local.get $i))
+          (call $hex-digit
+            (bit-and (unsigned-bit-shift-right (local.get $v)
+                                               (* 4 (- 7 (local.get $i))))
+                     15)))
+        (local.set $i (inc (local.get $i)))))
+    (call $print (i32.const 16) (i32.const 8)))
+
+  ;; hand nacre's bytes to C, one poke at a time; returns the length
+  (func $feed (param $ptr i32) (param $len i32) (result i32)
+    (let [$i 0]
+      (while (< (local.get $i) (local.get $len))
+        (call $poke (local.get $i) (i32.load8_u (+ (local.get $ptr) (local.get $i))))
+        (local.set $i (inc (local.get $i))))
+      (local.get $len)))
+
+  (func (export "_start")
+    (call $print "the message:   The pearl remembers the sand.\n")
+    (call $print "crc32 by C:    ")
+    (call $print-hex (call $crc32 (call $feed "The pearl remembers the sand.")))
+    (call $print "\n")
+    (call $print "mixed by Rust: ")
+    (call $print-hex (call $fmix32 (call $crc32 (call $feed "The pearl remembers the sand."))))
+    (call $print "\n")))
