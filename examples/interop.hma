@@ -1,12 +1,12 @@
-;; interop.nacre — a Lisp walks into the binary wilderness.
+;; interop.hma — a Lisp walks into the binary wilderness.
 ;;
 ;; The checksum is computed by zlib's CRC-32 algorithm, compiled from
 ;; C. The mixing is MurmurHash3's finalizer, compiled from Rust. Each
-;; lives in its own module with its own memory; nacre feeds the C
+;; lives in its own module with its own memory; Hot Glue feeds the C
 ;; module byte by byte across the boundary and threads the result
 ;; through the Rust one. Three languages, three modules, one stack.
 ;;
-;;   npx tsx src/nacre/cli.ts src/nacre/clj.nacre examples/interop.nacre > interop.wat
+;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/interop.hma > interop.wat
 ;;   wasmtime run --preload c=examples/native/crc32.wasm \
 ;;                --preload rust=examples/native/fmix.wasm interop.wat
 
@@ -39,7 +39,7 @@
         (local.set $i (inc (local.get $i)))))
     (call $print (i32.const 16) (i32.const 8)))
 
-  ;; hand nacre's bytes to C, one poke at a time; returns the length
+  ;; hand hot glue bytes to C, one poke at a time; returns the length
   (func $feed (param $ptr i32) (param $len i32) (result i32)
     (let [$i 0]
       (while (< (local.get $i) (local.get $len))

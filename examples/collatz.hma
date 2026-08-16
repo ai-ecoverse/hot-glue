@@ -1,6 +1,6 @@
-;; collatz.nacre — the Clojure accent on bare metal.
+;; collatz.hma — the Clojure accent on bare metal.
 ;;
-;;   npx tsx src/nacre/cli.ts src/nacre/clj.nacre examples/collatz.nacre > collatz.wat
+;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/collatz.hma > collatz.wat
 ;;   wasmtime run --invoke steps collatz.wat 27        ;; 111
 ;;   wasmtime run --invoke sum-squares collatz.wat     ;; 285
 

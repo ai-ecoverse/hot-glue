@@ -1,11 +1,11 @@
-;; deepzoom.nacre — floating point arrived; the dive goes to the floor.
+;; deepzoom.hma — floating point arrived; the dive goes to the floor.
 ;;
 ;; Two hundred frames of f64 descent toward the seahorse valley at
 ;; (-0.743643887037151, 0.131825904205330), a million-fold zoom that
 ;; ten fixed-point bits could never survive. Same Y4M pipeline as
 ;; mandelzoom, so ffmpeg needs no flags:
 ;;
-;;   npx tsx src/nacre/cli.ts src/nacre/clj.nacre examples/deepzoom.nacre > deepzoom.wat
+;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/deepzoom.hma > deepzoom.wat
 ;;   wasmtime deepzoom.wat | ffmpeg -i - deepzoom.mp4
 ;;
 ;; Floats put this module in explicit-type territory: signatures that

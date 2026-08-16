@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { compile } from './nacre.js';
+import { compile } from './bootstrap.js';
 import { lower } from './binaryen-lower.js';
 
 export function buildPage(root = '.'): string {
@@ -27,18 +27,18 @@ export function buildPage(root = '.'): string {
     }
   };
   let page = readFileSync(p('web', 'playground.template.html'), 'utf8');
-  page = fill(page, '__EXPAND_B64__', b64(lower(compile(read('src/nacre/prelude.nacre', 'src/nacre/expand.nacre')))));
-  page = fill(page, '__AS_B64__', b64(lower(compile(read('src/nacre/prelude.nacre', 'src/nacre/as.nacre')))));
+  page = fill(page, '__EXPAND_B64__', b64(lower(compile(read('src/hotglue/prelude.hma', 'src/hotglue/expand.hma')))));
+  page = fill(page, '__AS_B64__', b64(lower(compile(read('src/hotglue/prelude.hma', 'src/hotglue/as.hma')))));
   page = fill(page, '__C_B64__', wasm('examples/native/crc32.wasm'));
   page = fill(page, '__RUST_B64__', wasm('examples/native/fmix.wasm'));
-  page = fill(page, '__FIZZBUZZ__', JSON.stringify(read('examples/fizzbuzz.nacre')));
-  page = fill(page, '__GC_AST__', JSON.stringify(read('examples/gc-ast.nacre')));
-  page = fill(page, '__CLJ__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/collatz.nacre')));
-  page = fill(page, '__INTEROP__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/interop.nacre')));
-  page = fill(page, '__MANDELBROT__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/mandelbrot.nacre')));
-  page = fill(page, '__MANDELZOOM__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/mandelzoom.nacre')));
-  page = fill(page, '__DEEPZOOM__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/deepzoom.nacre')));
-  page = fill(page, '__GPT__', JSON.stringify(read('src/nacre/clj.nacre', 'examples/gpt.nacre')));
+  page = fill(page, '__FIZZBUZZ__', JSON.stringify(read('examples/fizzbuzz.hma')));
+  page = fill(page, '__GC_AST__', JSON.stringify(read('examples/gc-ast.hma')));
+  page = fill(page, '__CLJ__', JSON.stringify(read('src/hotglue/clj.hma', 'examples/collatz.hma')));
+  page = fill(page, '__INTEROP__', JSON.stringify(read('src/hotglue/clj.hma', 'examples/interop.hma')));
+  page = fill(page, '__MANDELBROT__', JSON.stringify(read('src/hotglue/clj.hma', 'examples/mandelbrot.hma')));
+  page = fill(page, '__MANDELZOOM__', JSON.stringify(read('src/hotglue/clj.hma', 'examples/mandelzoom.hma')));
+  page = fill(page, '__DEEPZOOM__', JSON.stringify(read('src/hotglue/clj.hma', 'examples/deepzoom.hma')));
+  page = fill(page, '__GPT__', JSON.stringify(read('src/hotglue/clj.hma', 'examples/gpt.hma')));
   // the oyster's weights ride along gzipped; the tab inflates them itself
   let oyster = '';
   try {

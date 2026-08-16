@@ -1,10 +1,10 @@
 ;; FizzBuzz. The macros are the argument; the machine is the proof.
 ;;
-;;   npx tsx src/nacre/cli.ts examples/fizzbuzz.nacre > /tmp/fizzbuzz.wat
+;;   npx tsx src/hotglue/cli.ts examples/fizzbuzz.hma > /tmp/fizzbuzz.wat
 ;;   wasmtime /tmp/fizzbuzz.wat
 ;;
 ;; Memory: iovec at 0, digit buffer below 24, nwritten at 24.
-;; Nacre pools inline strings into data segments from 32 up.
+;; Hot Glue pools inline strings into data segments from 32 up.
 
 (module
   (import "wasi_snapshot_preview1" "fd_write"

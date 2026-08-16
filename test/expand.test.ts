@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile } from '../../src/nacre/nacre.js';
+import { compile } from '../../src/hotglue/bootstrap.js';
 
 function wasmtime(): string | null {
   for (const bin of ['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')]) {
@@ -18,7 +18,7 @@ function wasmtime(): string | null {
 }
 const runtime = wasmtime();
 
-const dir = mkdtempSync(join(tmpdir(), 'nacre-expand-'));
+const dir = mkdtempSync(join(tmpdir(), 'hotglue-expand-'));
 const expandWat = join(dir, 'expand.wat');
 const asWat = join(dir, 'as.wat');
 
@@ -27,28 +27,28 @@ const pipe = (module: string, input: string | Buffer): Buffer =>
   execFileSync(runtime!, [module], { input, maxBuffer: 1 << 26 });
 
 beforeAll(() => {
-  writeFileSync(expandWat, compile(src('src/nacre/prelude.nacre', 'src/nacre/expand.nacre')));
-  writeFileSync(asWat, compile(src('src/nacre/prelude.nacre', 'src/nacre/as.nacre')));
+  writeFileSync(expandWat, compile(src('src/hotglue/prelude.hma', 'src/hotglue/expand.hma')));
+  writeFileSync(asWat, compile(src('src/hotglue/prelude.hma', 'src/hotglue/as.hma')));
 });
 
-describe.skipIf(!runtime)('expand.nacre — the expander', () => {
+describe.skipIf(!runtime)('expand.hma — the expander', () => {
   it('matches stage 0 on fizzbuzz, byte for byte', () => {
-    const source = readFileSync('examples/fizzbuzz.nacre', 'utf8');
+    const source = readFileSync('examples/fizzbuzz.hma', 'utf8');
     expect(pipe(expandWat, source).toString()).toBe(compile(source));
   });
 
   it('matches stage 0 on the assembler, byte for byte', () => {
-    const source = src('src/nacre/prelude.nacre', 'src/nacre/as.nacre');
+    const source = src('src/hotglue/prelude.hma', 'src/hotglue/as.hma');
     expect(pipe(expandWat, source).toString()).toBe(compile(source));
   });
 
   it('matches stage 0 on the GC module, byte for byte', () => {
-    const source = readFileSync('examples/gc-ast.nacre', 'utf8');
+    const source = readFileSync('examples/gc-ast.hma', 'utf8');
     expect(pipe(expandWat, source).toString()).toBe(compile(source));
   });
 
   it('expands its own source to the text it is running as', () => {
-    const source = src('src/nacre/prelude.nacre', 'src/nacre/expand.nacre');
+    const source = src('src/hotglue/prelude.hma', 'src/hotglue/expand.hma');
     expect(pipe(expandWat, source).toString()).toBe(readFileSync(expandWat, 'utf8'));
   });
 
@@ -60,16 +60,16 @@ describe.skipIf(!runtime)('expand.nacre — the expander', () => {
     writeFileSync(expandWasm, pipe(asWasm, readFileSync(expandWat)));
 
     // From here, no TypeScript and no text parser: source → expand.wasm → as.wasm → binary.
-    const fbWat = pipe(expandWasm, readFileSync('examples/fizzbuzz.nacre', 'utf8'));
+    const fbWat = pipe(expandWasm, readFileSync('examples/fizzbuzz.hma', 'utf8'));
     const fbWasm = join(dir, 'fb.wasm');
     writeFileSync(fbWasm, pipe(asWasm, fbWat));
     expect(execFileSync(runtime!, [fbWasm], { maxBuffer: 1 << 26 }).toString()).toContain('FizzBuzz');
 
     // The ouroboros, both heads: each tool rebuilds itself through the other.
-    const expandWat2 = pipe(expandWasm, src('src/nacre/prelude.nacre', 'src/nacre/expand.nacre'));
+    const expandWat2 = pipe(expandWasm, src('src/hotglue/prelude.hma', 'src/hotglue/expand.hma'));
     const expandWasm2 = pipe(asWasm, expandWat2);
     expect(expandWasm2.equals(readFileSync(expandWasm))).toBe(true);
-    const asWat2 = pipe(expandWasm, src('src/nacre/prelude.nacre', 'src/nacre/as.nacre'));
+    const asWat2 = pipe(expandWasm, src('src/hotglue/prelude.hma', 'src/hotglue/as.hma'));
     const asWasm2 = pipe(asWasm, asWat2);
     expect(asWasm2.equals(readFileSync(asWasm))).toBe(true);
   });

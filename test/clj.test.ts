@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile } from '../../src/nacre/nacre.js';
+import { compile } from '../../src/hotglue/bootstrap.js';
 
 function wasmtime(): string | null {
   for (const bin of ['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')]) {
@@ -18,7 +18,7 @@ function wasmtime(): string | null {
 }
 const runtime = wasmtime();
 
-const dir = mkdtempSync(join(tmpdir(), 'nacre-clj-'));
+const dir = mkdtempSync(join(tmpdir(), 'hotglue-clj-'));
 const src = (...files: string[]) => files.map((f) => readFileSync(f, 'utf8')).join('\n');
 const watFile = join(dir, 'collatz.wat');
 
@@ -28,10 +28,10 @@ const invoke = (name: string, ...args: string[]) =>
     .trim();
 
 beforeAll(() => {
-  writeFileSync(watFile, compile(src('src/nacre/clj.nacre', 'examples/collatz.nacre')));
+  writeFileSync(watFile, compile(src('src/hotglue/clj.hma', 'examples/collatz.hma')));
 });
 
-describe.skipIf(!runtime)('clj.nacre — the Clojure accent', () => {
+describe.skipIf(!runtime)('clj.hma — the Clojure accent', () => {
   it('loop/recur: collatz of 27 takes 111 steps', () => {
     expect(invoke('steps', '27')).toBe('111');
   });
@@ -51,7 +51,7 @@ describe.skipIf(!runtime)('clj.nacre — the Clojure accent', () => {
 
   it('the assembled binary agrees', () => {
     const asWat = join(dir, 'as.wat');
-    writeFileSync(asWat, compile(src('src/nacre/prelude.nacre', 'src/nacre/as.nacre')));
+    writeFileSync(asWat, compile(src('src/hotglue/prelude.hma', 'src/hotglue/as.hma')));
     const bin = execFileSync(runtime!, [asWat], { input: readFileSync(watFile), maxBuffer: 1 << 26 });
     const wasm = join(dir, 'collatz.wasm');
     writeFileSync(wasm, bin);

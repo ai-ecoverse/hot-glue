@@ -1,18 +1,18 @@
 #!/usr/bin/env npx tsx
 /**
- * nacre — expand WebAssembly macros, emit WAT.
+ * hotglue — expand WebAssembly macros, emit WAT.
  *
  * Usage:
- *   nacre <files.nacre...>       Expand files, in order, as one unit
- *   nacre -O <files.nacre...>    Lower through Binaryen instead: emit
+ *   hotglue <files.hma...>       Expand files, in order, as one unit
+ *   hotglue -O <files.hma...>    Lower through Binaryen instead: emit
  *                                an optimized .wasm binary to stdout
- *   nacre < file.nacre           Or read stdin
+ *   hotglue < file.hma           Or read stdin
  *
  * Without -O the output is plain WAT. Feed it to wasmtime, or to the
- * self-hosted assembler (as.nacre).
+ * self-hosted assembler (as.hma).
  */
 import { readFileSync } from 'node:fs';
-import { compile } from './nacre.js';
+import { compile } from './bootstrap.js';
 
 try {
   const args = process.argv.slice(2);

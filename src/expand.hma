@@ -1,13 +1,13 @@
-;; expand.nacre — the nacre expander, written in nacre.
+;; expand.hma — the Hot Glue expander, written in Hot Glue.
 ;;
-;; Reads nacre source (defmacros and a module) on stdin. Writes the
+;; Reads Hot Glue source (defmacros and a module) on stdin. Writes the
 ;; expanded, lowered, printed WAT on stdout — byte-identical to what
 ;; stage 0 prints. Runs under any WASI runtime, and stays within the
-;; instruction subset as.nacre assembles, so the toolchain can build
+;; instruction subset as.hma assembles, so the toolchain can build
 ;; itself without a text parser in sight:
 ;;
-;;   npx tsx src/nacre/cli.ts src/nacre/prelude.nacre src/nacre/expand.nacre > expand.wat
-;;   cat src/nacre/prelude.nacre src/nacre/expand.nacre | wasmtime expand.wat > expand2.wat
+;;   npx tsx src/hotglue/cli.ts src/hotglue/prelude.hma src/hotglue/expand.hma > expand.wat
+;;   cat src/hotglue/prelude.hma src/hotglue/expand.hma | wasmtime expand.wat > expand2.wat
 ;;   diff expand.wat expand2.wat   ;; nothing
 ;;
 ;; Memory: 0 iovec, 8 io-count, 12 heap pointer, 16 nil, 20 cursor,

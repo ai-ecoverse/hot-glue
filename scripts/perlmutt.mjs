@@ -1,11 +1,11 @@
-// perlmutt.mjs — perlmutt is nacre in its mother tongue, and the
+// perlmutt.mjs — perlmutt is Hot Glue (born nacre) in its mother tongue, and the
 // mother of Perl if anyone asks. The conductor of the all-wasm A/V
 // pipeline: every hot path below runs inside a WebAssembly sandbox,
 // and this script only carries bytes between sandboxes.
 //
-//   render   examples/deepzoom.nacre  → Y4M   (wasmtime, nacre-assembled)
+//   render   examples/deepzoom.hma  → Y4M   (wasmtime, hotglue-assembled)
 //   voice    Kokoro-82M               → PCM   (onnxruntime wasm, in Chromium)
-//   contain  examples/wav.nacre       → WAV   (the Lisp writes the header)
+//   contain  examples/wav.hma       → WAV   (the Lisp writes the header)
 //   cut      ffmpeg.wasm              → MP4   (x264, in the sandbox)
 //
 // Needs: wasmtime on PATH, a Kokoro mirror (npm run fetch:kokoro),
@@ -41,12 +41,12 @@ const wasmtime = (() => {
 
 const dir = mkdtempSync(join(tmpdir(), "perlmutt-"));
 const expand = (out, ...files) =>
-  writeFileSync(join(dir, out), execFileSync("npx", ["tsx", "src/nacre/cli.ts", ...files], { maxBuffer: 1 << 26 }));
+  writeFileSync(join(dir, out), execFileSync("npx", ["tsx", "src/hotglue/cli.ts", ...files], { maxBuffer: 1 << 26 }));
 
-console.log("expanding the nacre modules…");
-expand("deepzoom.wat", "src/nacre/clj.nacre", "examples/deepzoom.nacre");
-expand("wav.wat", "src/nacre/clj.nacre", "examples/wav.nacre");
-expand("as.wat", "src/nacre/prelude.nacre", "src/nacre/as.nacre");
+console.log("expanding the hot glue modules…");
+expand("deepzoom.wat", "src/hotglue/clj.hma", "examples/deepzoom.hma");
+expand("wav.wat", "src/hotglue/clj.hma", "examples/wav.hma");
+expand("as.wat", "src/hotglue/prelude.hma", "src/hotglue/as.hma");
 
 console.log("assembling with the self-hosted assembler…");
 const deepWasm = join(dir, "deepzoom.wasm");

@@ -1,11 +1,11 @@
-;; mandelbrot.nacre — the set, rendered by macros, in i32 and nothing else.
+;; mandelbrot.hma — the set, rendered by macros, in i32 and nothing else.
 ;;
 ;; Fixed-point arithmetic with ten fractional bits, because the machine
 ;; this Lisp assembles for has no floats it has been taught yet. Run
 ;; under WASI it prints a PPM; loaded in a browser it hands the canvas
 ;; a framebuffer. Same module, same bytes.
 ;;
-;;   npx tsx src/nacre/cli.ts src/nacre/clj.nacre examples/mandelbrot.nacre > mandelbrot.wat
+;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/mandelbrot.hma > mandelbrot.wat
 ;;   wasmtime mandelbrot.wat > mandelbrot.ppm
 
 (module

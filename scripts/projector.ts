@@ -3,7 +3,7 @@
  * hotglue — the interpreter for .hma files (hot melt adhesive).
  *
  * An .hma file is a film described in S-expressions, read by the same
- * reader that reads nacre, because the glue layer speaks the house
+ * reader that reads Hot Glue, because the glue layer speaks the house
  * language. Each step's hot path runs in a sandbox; hotglue only
  * carries bytes between them and never does anything a glue gun
  * would be ashamed of.
@@ -13,10 +13,10 @@
  * macro layers listed in compile order, so the file names every file.
  *
  * Steps:
- *   (filter NAME SOURCES...)             declare a wasm verb: the nacre
+ *   (filter NAME SOURCES...)             declare a wasm verb: the Hot Glue
  *                                        sources compile to a stdin→stdout
  *                                        program, macro layers first, as
- *                                        on the nacre CLI
+ *                                        on the Hot Glue CLI
  *   (let NAME (FILTER [INVAR]))          run a declared filter
  *   (let NAME (perl SCRIPT.pl))          zeroperl, Perl-5-in-wasm  → text
  *   (let NAME (speak TEXTVAR VOICE))     Kokoro under onnxruntime-wasm → f32 PCM
@@ -31,7 +31,7 @@ import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { compile, read, Sym, type Node } from '../src/nacre/nacre.js';
+import { compile, read, Sym, type Node } from '../src/hotglue/bootstrap.js';
 
 const wasmtime = (() => {
   for (const bin of ['wasmtime', join(homedir(), '.local/bin/wasmtime')]) {
@@ -53,7 +53,7 @@ const name = (n: Node): string => {
 
 // expand + assemble happen with the house tools; run under wasmtime
 const wats = new Map<string, string>();
-function nacreRun(files: string[], input: Buffer | string): Buffer {
+function filterRun(files: string[], input: Buffer | string): Buffer {
   const key = files.join('+');
   if (!wats.has(key)) {
     const p = join(dir, `${wats.size}.wat`);
@@ -69,7 +69,7 @@ async function step(form: Node[], env: Map<string, Value>, filters: Map<string, 
   const op = name(form[0]);
   if (filters.has(op)) {
     const input = form[1] ? env.get(name(form[1]))! : Buffer.alloc(0);
-    return nacreRun(filters.get(op)!, input);
+    return filterRun(filters.get(op)!, input);
   }
   if (op === 'perl') {
     const { ZeroPerl } = await import('@6over3/zeroperl-ts');
@@ -102,7 +102,7 @@ async function step(form: Node[], env: Map<string, Value>, filters: Map<string, 
     console.log(`  webgpu rendered ${rgb.length / 196608} frames`);
     return rgb;
   }
-  throw new Error(`hotglue does not know how to ${op} — declare it: (filter ${op} macros.nacre program.nacre)`);
+  throw new Error(`hotglue does not know how to ${op} — declare it: (filter ${op} macros.hma program.hma)`);
 }
 
 async function cut(out: string, inputs: Node[], env: Map<string, Value>): Promise<void> {

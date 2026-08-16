@@ -1,11 +1,11 @@
-;; gc-ast.nacre — the § 2 node algebra of docs/wasm-macros.md, in earnest.
+;; gc-ast.hma — the § 2 node algebra of docs/wasm-macros.md, in earnest.
 ;;
 ;; The GC AST that the design document sketched: an abstract $node with
 ;; a location field, subtypes for numbers, pairs, and nil, pattern
 ;; matching by br_on_cast. The macros build GC literals at expansion
 ;; time — ($qlist 1 2 3 4 5) becomes a chain of struct.new forms.
 ;;
-;;   npx tsx src/nacre/cli.ts examples/gc-ast.nacre > gc.wat
+;;   npx tsx src/hotglue/cli.ts examples/gc-ast.hma > gc.wat
 ;;   wasmtime run -W gc,function-references --invoke demo gc.wat   ;; 15
 
 (module

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile } from '../../src/nacre/nacre.js';
+import { compile } from '../../src/hotglue/bootstrap.js';
 
 function probe(bins: string[], flag: string): string | null {
   for (const bin of bins) {
@@ -18,18 +18,18 @@ function probe(bins: string[], flag: string): string | null {
 }
 const runtime = probe(['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')], '--version');
 
-const dir = mkdtempSync(join(tmpdir(), 'nacre-tts-'));
+const dir = mkdtempSync(join(tmpdir(), 'hotglue-tts-'));
 const src = (...files: string[]) => files.map((f) => readFileSync(f, 'utf8')).join('\n');
 const MIRROR = process.env.KOKORO_MIRROR ?? 'models/kokoro';
 const hasModel = existsSync(join(MIRROR, 'onnx', 'model_quantized.onnx'));
 
 const wavWat = () => {
   const p = join(dir, 'wav.wat');
-  if (!existsSync(p)) writeFileSync(p, compile(src('src/nacre/clj.nacre', 'examples/wav.nacre')));
+  if (!existsSync(p)) writeFileSync(p, compile(src('src/hotglue/clj.hma', 'examples/wav.hma')));
   return p;
 };
 
-describe.skipIf(!runtime)('wav.nacre — the Lisp writes the container', () => {
+describe.skipIf(!runtime)('wav.hma — the Lisp writes the container', () => {
   it('wraps float PCM into a WAV that decodes sample-exact', () => {
     const n = 24000;
     const pcm = Buffer.alloc(n * 4);

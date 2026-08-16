@@ -1,4 +1,4 @@
-;; The Nacre prelude — the macros the assembler is written with.
+;; The Hot Glue prelude — the macros the assembler is written with.
 ;; All value sugar is i32. The machine beneath speaks nothing else yet.
 
 (defmacro $when (test &rest body)

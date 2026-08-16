@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile, read, Sym } from '../../src/nacre/nacre.js';
+import { compile, read, Sym } from '../../src/hotglue/bootstrap.js';
 
 function probe(bins: string[], flag: string): string | null {
   for (const bin of bins) {
@@ -19,7 +19,7 @@ function probe(bins: string[], flag: string): string | null {
 const runtime = probe(['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')], '--version');
 const chromium = existsSync('/opt/pw-browsers/chromium');
 
-const dir = mkdtempSync(join(tmpdir(), 'nacre-hotglue-'));
+const dir = mkdtempSync(join(tmpdir(), 'hotglue-hotglue-'));
 
 describe('hot melt adhesive', () => {
   it('reads .hma with the house reader', () => {
@@ -84,7 +84,7 @@ describe('hot melt adhesive', () => {
       const wat = join(dir, 'rgb2y4m.wat');
       writeFileSync(
         wat,
-        compile(['src/nacre/clj.nacre', 'examples/rgb2y4m.nacre'].map((x) => readFileSync(x, 'utf8')).join('\n')),
+        compile(['src/hotglue/clj.hma', 'examples/rgb2y4m.hma'].map((x) => readFileSync(x, 'utf8')).join('\n')),
       );
       const y4m = execFileSync(runtime!, [wat], { input: f, maxBuffer: 1 << 26 });
       expect(y4m.subarray(0, 9).toString()).toBe('YUV4MPEG2');

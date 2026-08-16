@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile } from '../../src/nacre/nacre.js';
+import { compile } from '../../src/hotglue/bootstrap.js';
 
 function wasmtime(): string | null {
   for (const bin of ['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')]) {
@@ -18,7 +18,7 @@ function wasmtime(): string | null {
 }
 const runtime = wasmtime();
 
-const dir = mkdtempSync(join(tmpdir(), 'nacre-as-'));
+const dir = mkdtempSync(join(tmpdir(), 'hotglue-as-'));
 const asWat = join(dir, 'as.wat');
 
 /** Run a module (wat text or wasm binary path) as the assembler, stdin → stdout. */
@@ -33,11 +33,11 @@ const run = (wasm: Buffer, args: string[] = []): Buffer => {
 
 beforeAll(() => {
   const src =
-    readFileSync('src/nacre/prelude.nacre', 'utf8') + '\n' + readFileSync('src/nacre/as.nacre', 'utf8');
+    readFileSync('src/hotglue/prelude.hma', 'utf8') + '\n' + readFileSync('src/hotglue/as.hma', 'utf8');
   writeFileSync(asWat, compile(src));
 });
 
-describe.skipIf(!runtime)('as.nacre — the assembler', () => {
+describe.skipIf(!runtime)('as.hma — the assembler', () => {
   it('assembles a constant function', () => {
     const wasm = assemble(asWat, '(module (func (export "answer") (result i32) (i32.const 42)))');
     expect([...wasm.subarray(0, 8)]).toEqual([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]);
@@ -48,7 +48,7 @@ describe.skipIf(!runtime)('as.nacre — the assembler', () => {
   });
 
   it('assembles fizzbuzz, which then runs', () => {
-    const wat = compile(readFileSync('examples/fizzbuzz.nacre', 'utf8'));
+    const wat = compile(readFileSync('examples/fizzbuzz.hma', 'utf8'));
     const got = run(assemble(asWat, wat)).toString();
     const want =
       [...Array(100).keys()]
@@ -59,7 +59,7 @@ describe.skipIf(!runtime)('as.nacre — the assembler', () => {
   });
 
   it('assembles the GC AST — rec groups, casts, and all', () => {
-    const wat = compile(readFileSync('examples/gc-ast.nacre', 'utf8'));
+    const wat = compile(readFileSync('examples/gc-ast.hma', 'utf8'));
     const f = join(dir, 'gc.wasm');
     writeFileSync(f, assemble(asWat, wat));
     const got = execFileSync(runtime!, ['run', '-W', 'gc,function-references', '--invoke', 'demo', f], {

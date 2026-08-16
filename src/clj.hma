@@ -1,6 +1,6 @@
-;; clj.nacre — a Clojure accent for the WebAssembly macro assembler.
+;; clj.hma — a Clojure accent for the WebAssembly macro assembler.
 ;;
-;;   npx tsx src/nacre/cli.ts src/nacre/clj.nacre your.nacre
+;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma your.hma
 ;;
 ;; Brackets read as parentheses, so bindings look like home. Bare
 ;; numbers in these macros wrap themselves in i32.const. Locals are

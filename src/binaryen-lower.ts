@@ -1,7 +1,7 @@
 /**
  * Binaryen as the alternate lowering (docs/wasm-macros.md § 9, stage 5).
  *
- * Parse the WAT nacre prints into Binaryen IR, optimize, emit a binary.
+ * Parse the WAT Hot Glue prints into Binaryen IR, optimize, emit a binary.
  * The feature set is curated: Features.All turns on encodings (compact
  * imports, among others) that shipping runtimes do not speak yet.
  */

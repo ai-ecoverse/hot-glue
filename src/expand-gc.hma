@@ -1,6 +1,6 @@
-;; expand-gc.nacre — the nacre expander, re-founded on the GC heap.
+;; expand-gc.hma — the Hot Glue expander, re-founded on the GC heap.
 ;;
-;; Same contract as expand.nacre, byte for byte: nacre source on
+;; Same contract as expand.hma, byte for byte: Hot Glue source on
 ;; stdin, expanded WAT on stdout. But the node algebra now lives as
 ;; the § 2 structs of docs/wasm-macros.md — an abstract $node with
 ;; subtypes for numbers, symbols, strings, pairs, and nil — and the
@@ -9,10 +9,10 @@
 ;; bytes (input, output, names) remain in linear memory, because WASI
 ;; speaks buffers and strings are bytes wherever they live.
 ;;
-;; It stays inside the subset as.nacre assembles, so the loop holds:
+;; It stays inside the subset as.hma assembles, so the loop holds:
 ;;
-;;   npx tsx src/nacre/cli.ts src/nacre/prelude.nacre src/nacre/expand-gc.nacre > expand-gc.wat
-;;   cat src/nacre/prelude.nacre src/nacre/expand-gc.nacre | wasmtime -W gc,function-references expand-gc.wat > again.wat
+;;   npx tsx src/hotglue/cli.ts src/hotglue/prelude.hma src/hotglue/expand-gc.hma > expand-gc.wat
+;;   cat src/hotglue/prelude.hma src/hotglue/expand-gc.hma | wasmtime -W gc,function-references expand-gc.wat > again.wat
 ;;   diff expand-gc.wat again.wat   ;; nothing
 ;;
 ;; Memory: 0 iovec, 8 io-count, 12 heap pointer, 20 cursor, 24 input

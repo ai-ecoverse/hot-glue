@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile } from '../../src/nacre/nacre.js';
+import { compile } from '../../src/hotglue/bootstrap.js';
 
 function probe(bins: string[], flag: string): string | null {
   for (const bin of bins) {
@@ -18,7 +18,7 @@ function probe(bins: string[], flag: string): string | null {
 }
 const runtime = probe(['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')], '--version');
 
-const dir = mkdtempSync(join(tmpdir(), 'nacre-floats-'));
+const dir = mkdtempSync(join(tmpdir(), 'hotglue-floats-'));
 const src = (...files: string[]) => files.map((f) => readFileSync(f, 'utf8')).join('\n');
 const asWat = join(dir, 'as.wat');
 const GC = ['-W', 'gc,function-references'];
@@ -38,7 +38,7 @@ const invoke = (wasm: string, name: string) =>
   );
 
 beforeAll(() => {
-  writeFileSync(asWat, compile(src('src/nacre/prelude.nacre', 'src/nacre/as.nacre')));
+  writeFileSync(asWat, compile(src('src/hotglue/prelude.hma', 'src/hotglue/as.hma')));
 });
 
 describe.skipIf(!runtime)('floating point — the missing vowels', () => {
@@ -55,20 +55,20 @@ describe.skipIf(!runtime)('floating point — the missing vowels', () => {
   });
 
   it('float literals travel through all three expanders as the same bytes', () => {
-    const source = src('src/nacre/clj.nacre', 'examples/deepzoom.nacre');
+    const source = src('src/hotglue/clj.hma', 'examples/deepzoom.hma');
     const want = compile(source);
     const expandWat = join(dir, 'expand.wat');
-    writeFileSync(expandWat, compile(src('src/nacre/prelude.nacre', 'src/nacre/expand.nacre')));
+    writeFileSync(expandWat, compile(src('src/hotglue/prelude.hma', 'src/hotglue/expand.hma')));
     expect(execFileSync(runtime!, [expandWat], { input: source, maxBuffer: 1 << 26 }).toString()).toBe(want);
     const gcWat = join(dir, 'expand-gc.wat');
-    writeFileSync(gcWat, compile(src('src/nacre/prelude.nacre', 'src/nacre/expand-gc.nacre')));
+    writeFileSync(gcWat, compile(src('src/hotglue/prelude.hma', 'src/hotglue/expand-gc.hma')));
     expect(
       execFileSync(runtime!, ['run', ...GC, gcWat], { input: source, maxBuffer: 1 << 26 }).toString(),
     ).toBe(want);
   });
 
-  it('deepzoom: the nacre-assembled f64 binary dives a million deep', () => {
-    const wat = compile(src('src/nacre/clj.nacre', 'examples/deepzoom.nacre'));
+  it('deepzoom: the hotglue-assembled f64 binary dives a million deep', () => {
+    const wat = compile(src('src/hotglue/clj.hma', 'examples/deepzoom.hma'));
     const wasm = join(dir, 'deepzoom.wasm');
     writeFileSync(wasm, execFileSync(runtime!, [asWat], { input: wat, maxBuffer: 1 << 26 }));
     const y4m = execFileSync(runtime!, [wasm], { maxBuffer: 1 << 27 });

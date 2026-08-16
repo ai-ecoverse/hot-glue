@@ -10,7 +10,7 @@
 //
 //   KOKORO_MIRROR=models/kokoro TEXT="..." OUT=voice.f32 node scripts/kokoro-voice.mjs
 //
-// Output: raw 32-bit float PCM, mono, 24kHz — exactly what wav.nacre
+// Output: raw 32-bit float PCM, mono, 24kHz — exactly what wav.hma
 // drinks on stdin.
 import { createServer } from "node:http";
 import { readFileSync, existsSync } from "node:fs";

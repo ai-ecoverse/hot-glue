@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile } from '../../src/nacre/nacre.js';
+import { compile } from '../../src/hotglue/bootstrap.js';
 
 const wrap = (body: string) => compile(`(module ${body})`);
 
@@ -20,7 +20,7 @@ function wasmtime(): string | null {
 }
 const runtime = wasmtime();
 
-describe('nacre stage 0', () => {
+describe('hot glue stage 0', () => {
   it('expands a template macro', () => {
     const wat = wrap(`
       (defmacro $when (test body) \`(if ,test (then ,body)))
@@ -109,8 +109,8 @@ describe('nacre stage 0', () => {
   });
 
   it.skipIf(!runtime)('fizzbuzz: expands, validates, and runs', () => {
-    const wat = compile(readFileSync('examples/fizzbuzz.nacre', 'utf8'));
-    const file = join(mkdtempSync(join(tmpdir(), 'nacre-')), 'fizzbuzz.wat');
+    const wat = compile(readFileSync('examples/fizzbuzz.hma', 'utf8'));
+    const file = join(mkdtempSync(join(tmpdir(), 'hotglue-')), 'fizzbuzz.wat');
     writeFileSync(file, wat);
     const got = execFileSync(runtime!, [file], { encoding: 'utf8' });
     const want =

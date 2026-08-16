@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { crc32 } from 'node:zlib';
-import { compile } from '../../src/nacre/nacre.js';
+import { compile } from '../../src/hotglue/bootstrap.js';
 
 function wasmtime(): string | null {
   for (const bin of ['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')]) {
@@ -19,7 +19,7 @@ function wasmtime(): string | null {
 }
 const runtime = wasmtime();
 
-const dir = mkdtempSync(join(tmpdir(), 'nacre-interop-'));
+const dir = mkdtempSync(join(tmpdir(), 'hotglue-interop-'));
 const src = (...files: string[]) => files.map((f) => readFileSync(f, 'utf8')).join('\n');
 
 // MurmurHash3's finalizer, the reference the Rust module must match
@@ -45,13 +45,13 @@ const mandelWat = join(dir, 'mandelbrot.wat');
 const asWat = join(dir, 'as.wat');
 
 beforeAll(() => {
-  writeFileSync(interopWat, compile(src('src/nacre/clj.nacre', 'examples/interop.nacre')));
-  writeFileSync(mandelWat, compile(src('src/nacre/clj.nacre', 'examples/mandelbrot.nacre')));
-  writeFileSync(asWat, compile(src('src/nacre/prelude.nacre', 'src/nacre/as.nacre')));
+  writeFileSync(interopWat, compile(src('src/hotglue/clj.hma', 'examples/interop.hma')));
+  writeFileSync(mandelWat, compile(src('src/hotglue/clj.hma', 'examples/mandelbrot.hma')));
+  writeFileSync(asWat, compile(src('src/hotglue/prelude.hma', 'src/hotglue/as.hma')));
 });
 
 describe.skipIf(!runtime)('the binary wilderness', () => {
-  it('nacre calls C calls back: crc32 agrees with node:zlib', () => {
+  it('hot glue calls C calls back: crc32 agrees with node:zlib', () => {
     const got = execFileSync(runtime!, ['run', ...PRELOADS, interopWat], { maxBuffer: 1 << 26 }).toString();
     expect(got).toContain(`crc32 by C:    ${hex(crc32(Buffer.from(MSG)))}`);
   });
@@ -61,7 +61,7 @@ describe.skipIf(!runtime)('the binary wilderness', () => {
     expect(got).toContain(`mixed by Rust: ${hex(fmix32(crc32(Buffer.from(MSG))))}`);
   });
 
-  it('the nacre-assembled binary sits in the same food chain', () => {
+  it('the hotglue-assembled binary sits in the same food chain', () => {
     const bin = execFileSync(runtime!, [asWat], { input: readFileSync(interopWat), maxBuffer: 1 << 26 });
     const wasm = join(dir, 'interop.wasm');
     writeFileSync(wasm, bin);

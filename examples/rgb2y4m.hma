@@ -1,11 +1,11 @@
-;; rgb2y4m.nacre — the Lisp glues pixels into a stream.
+;; rgb2y4m.hma — the Lisp glues pixels into a stream.
 ;;
 ;; Reads raw RGB24 frames (256 by 256, concatenated) on stdin and
 ;; emits YUV4MPEG2 on stdout — the same integer BT.601 the other
 ;; renderers use, so a GPU that only knows RGBA can still hand its
 ;; frames to ffmpeg. Frame count is whatever stdin holds.
 ;;
-;;   npx tsx src/nacre/cli.ts src/nacre/clj.nacre examples/rgb2y4m.nacre > rgb2y4m.wat
+;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/rgb2y4m.hma > rgb2y4m.wat
 ;;   wasmtime rgb2y4m.wat < frames.rgb > frames.y4m
 
 (module

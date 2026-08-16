@@ -3,7 +3,7 @@
 ;; A film described in the Lisp's own notation and interpreted by
 ;; scripts/hotglue.ts. Every step below runs its hot path in a
 ;; sandbox: Perl writes the words in wasm, Kokoro speaks them in
-;; wasm, WebGPU renders the picture, the nacre modules glue pixels
+;; wasm, WebGPU renders the picture, the hot glue modules glue pixels
 ;; and samples into streams, and ffmpeg.wasm cuts the print.
 ;;
 ;;   npx tsx scripts/hotglue.ts examples/film.hma
@@ -11,11 +11,11 @@
 (film gpu-perlmutt.mp4
   ;; The film declares its own toolchain. A filter is a wasm program,
   ;; stdin to stdout, compiled from the sources named here — macro
-  ;; layers first, then the program, the same convention as the nacre
+  ;; layers first, then the program, the same convention as the Hot Glue
   ;; CLI. Nothing below arrives implicitly: every file this film
   ;; touches is written in this file.
-  (filter wav src/nacre/clj.nacre examples/wav.nacre)
-  (filter rgb->y4m src/nacre/clj.nacre examples/rgb2y4m.nacre)
+  (filter wav src/hotglue/clj.hma examples/wav.hma)
+  (filter rgb->y4m src/hotglue/clj.hma examples/rgb2y4m.hma)
 
   (let text (perl examples/narration.pl))
   (let pcm (speak text af_heart))

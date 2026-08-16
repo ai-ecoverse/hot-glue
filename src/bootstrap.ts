@@ -1,5 +1,5 @@
 /**
- * Nacre, stage 0 — the bootstrap expander (docs/wasm-macros.md § 9).
+ * Hot Glue, stage 0 — the bootstrap expander (docs/wasm-macros.md § 9).
  *
  * One file: reader, expander, lowerer. A node is a number, a string,
  * a symbol, or a list. Symbols carry hygiene marks in a bitset. Each

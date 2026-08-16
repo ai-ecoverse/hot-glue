@@ -1,7 +1,7 @@
 // mandel.wgsl — the set, on whatever silicon answers.
 //
 // The same escape-time iteration and the same palette as
-// examples/deepzoom.nacre, in WGSL compute. One dispatch per frame;
+// examples/deepzoom.hma, in WGSL compute. One dispatch per frame;
 // the zoom parameters arrive as uniforms from the hot glue. f32 is
 // the deepest this dialect dives — the mantissa is the seabed.
 

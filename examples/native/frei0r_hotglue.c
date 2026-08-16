@@ -1,4 +1,4 @@
-/* frei0r_nacre.c — a frei0r source plugin with a Lisp inside.
+/* frei0r_hotglue.c — a frei0r source plugin with a Lisp inside.
  *
  * ffmpeg dlopens this shared object through its frei0r support; the
  * plugin hosts the nacre-built mandelzoom module via the wasmtime C
@@ -9,13 +9,13 @@
  *
  * Build (see npm run build:frei0r):
  *   wasmtime as.wat < mandelzoom.wat > mandelzoom.wasm
- *   xxd -n nacre_wasm -i mandelzoom.wasm > mandelzoom_wasm.c
+ *   xxd -n hotglue_wasm -i mandelzoom.wasm > mandelzoom_wasm.c
  *   clang -O2 -shared -fPIC -I<wasmtime-c-api>/include \
- *     frei0r_nacre.c mandelzoom_wasm.c <wasmtime-c-api>/lib/libwasmtime.a \
- *     -lpthread -ldl -lm -o nacre_mandel.so
+ *     frei0r_hotglue.c mandelzoom_wasm.c <wasmtime-c-api>/lib/libwasmtime.a \
+ *     -lpthread -ldl -lm -o hotglue_mandel.so
  * Run:
  *   FREI0R_PATH=<dir> ffmpeg -f lavfi \
- *     -i "frei0r_src=size=256x256:framerate=30:filter_name=nacre_mandel" \
+ *     -i "frei0r_src=size=256x256:framerate=30:filter_name=hotglue_mandel" \
  *     -t 5 out.mp4
  */
 #include <stdint.h>
@@ -41,8 +41,8 @@ typedef struct f0r_plugin_info {
   const char *explanation;
 } f0r_plugin_info_t;
 
-extern const unsigned char nacre_wasm[];
-extern const unsigned int nacre_wasm_len;
+extern const unsigned char hotglue_wasm[];
+extern const unsigned int hotglue_wasm_len;
 
 typedef struct {
   int w, h;
@@ -58,7 +58,7 @@ int f0r_init(void) { return 1; }
 void f0r_deinit(void) {}
 
 void f0r_get_plugin_info(f0r_plugin_info_t *info) {
-  info->name = "nacre_mandel";
+  info->name = "hotglue_mandel";
   info->author = "the allegorithm oyster";
   info->plugin_type = F0R_PLUGIN_TYPE_SOURCE;
   info->color_model = F0R_COLOR_MODEL_RGBA8888;
@@ -83,7 +83,7 @@ f0r_instance_t f0r_construct(unsigned int width, unsigned int height) {
   n->ctx = wasmtime_store_context(n->store);
 
   wasmtime_module_t *module = NULL;
-  if (wasmtime_module_new(n->engine, nacre_wasm, nacre_wasm_len, &module)) return n;
+  if (wasmtime_module_new(n->engine, hotglue_wasm, hotglue_wasm_len, &module)) return n;
 
   wasmtime_linker_t *linker = wasmtime_linker_new(n->engine);
   wasmtime_linker_define_wasi(linker);

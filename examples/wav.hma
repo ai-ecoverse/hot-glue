@@ -1,4 +1,4 @@
-;; wav.nacre — the Lisp writes the container; the sandbox sings.
+;; wav.hma — the Lisp writes the container; the sandbox sings.
 ;;
 ;; Reads raw 32-bit float PCM (mono, 24kHz, little-endian) on stdin
 ;; and emits a RIFF/WAVE file of 16-bit samples on stdout: clamp,
@@ -7,7 +7,7 @@
 ;; neural net running in a wasm sandbox, the film is cut by ffmpeg
 ;; compiled to wasm, and the Lisp holds the header between them.
 ;;
-;;   npx tsx src/nacre/cli.ts src/nacre/clj.nacre examples/wav.nacre > wav.wat
+;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/wav.hma > wav.wat
 ;;   wasmtime wav.wat < voice.f32 > voice.wav
 
 (module

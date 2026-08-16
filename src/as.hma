@@ -1,9 +1,9 @@
-;; as.nacre — a WebAssembly assembler, written in nacre.
+;; as.hma — a WebAssembly assembler, written in Hot Glue.
 ;;
 ;; Reads WAT text (the dialect stage 0 prints) on stdin. Writes a
 ;; binary module on stdout. Runs under any WASI runtime:
 ;;
-;;   npx tsx src/nacre/cli.ts src/nacre/prelude.nacre src/nacre/as.nacre > as.wat
+;;   npx tsx src/hotglue/cli.ts src/hotglue/prelude.hma src/hotglue/as.hma > as.wat
 ;;   wasmtime as.wat < program.wat > program.wasm
 ;;
 ;; Self-hosting: as.wat assembles its own text, and the binary it

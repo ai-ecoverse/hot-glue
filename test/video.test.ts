@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile } from '../../src/nacre/nacre.js';
+import { compile } from '../../src/hotglue/bootstrap.js';
 
 function probe(bins: string[], flag: string): string | null {
   for (const bin of bins) {
@@ -19,7 +19,7 @@ function probe(bins: string[], flag: string): string | null {
 const runtime = probe(['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')], '--version');
 const ffmpeg = probe(['ffmpeg'], '-version');
 
-const dir = mkdtempSync(join(tmpdir(), 'nacre-video-'));
+const dir = mkdtempSync(join(tmpdir(), 'hotglue-video-'));
 const src = (...files: string[]) => files.map((f) => readFileSync(f, 'utf8')).join('\n');
 const zoomWat = join(dir, 'mandelzoom.wat');
 const y4mFile = join(dir, 'zoom.y4m');
@@ -28,7 +28,7 @@ const HEADER = 'YUV4MPEG2 W256 H256 F30:1 Ip A1:1 C444\n';
 const FRAME = 6 + 3 * 65536;
 
 beforeAll(() => {
-  writeFileSync(zoomWat, compile(src('src/nacre/clj.nacre', 'examples/mandelzoom.nacre')));
+  writeFileSync(zoomWat, compile(src('src/hotglue/clj.hma', 'examples/mandelzoom.hma')));
   if (runtime) writeFileSync(y4mFile, execFileSync(runtime, [zoomWat], { maxBuffer: 1 << 26 }));
 }, 120000);
 
@@ -74,16 +74,16 @@ describe.skipIf(!runtime)('mandelzoom — a Lisp is a video source', () => {
 
   // The frei0r rung: ffmpeg dlopens a plugin that hosts the wasm module
   // via the wasmtime C API. The .so is built by npm run build:frei0r and
-  // found through NACRE_FREI0R_DIR; without it, this documents itself.
-  const frei0rDir = process.env.NACRE_FREI0R_DIR ?? '';
-  it.skipIf(!ffmpeg || !frei0rDir || !existsSync(join(frei0rDir, 'nacre_mandel.so')))(
+  // found through HOTGLUE_FREI0R_DIR; without it, this documents itself.
+  const frei0rDir = process.env.HOTGLUE_FREI0R_DIR ?? '';
+  it.skipIf(!ffmpeg || !frei0rDir || !existsSync(join(frei0rDir, 'hotglue_mandel.so')))(
     'ffmpeg pulls frames straight out of the plugin',
     () => {
       const out = join(dir, 'frei0r.mp4');
       execFileSync(
         ffmpeg!,
         ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i',
-         'frei0r_src=size=256x256:framerate=30:filter_name=nacre_mandel:filter_params=x',
+         'frei0r_src=size=256x256:framerate=30:filter_name=hotglue_mandel:filter_params=x',
          '-t', '2', '-pix_fmt', 'yuv420p', out],
         { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, FREI0R_PATH: frei0rDir } },
       );
