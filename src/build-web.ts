@@ -29,16 +29,28 @@ export function buildPage(root = '.'): string {
   let page = readFileSync(p('web', 'playground.template.html'), 'utf8');
   page = fill(page, '__EXPAND_B64__', b64(lower(compile(read('src/hotglue/expand.hma')))));
   page = fill(page, '__AS_B64__', b64(lower(compile(read('src/hotglue/as.hma')))));
+  page = fill(page, '__GLUE_B64__', b64(lower(compile(read('src/hotglue/hotglue.hma')))));
   page = fill(page, '__C_B64__', wasm('examples/native/crc32.wasm'));
   page = fill(page, '__RUST_B64__', wasm('examples/native/fmix.wasm'));
-  page = fill(page, '__FIZZBUZZ__', JSON.stringify(read('examples/fizzbuzz.hma')));
-  page = fill(page, '__GC_AST__', JSON.stringify(read('examples/gc-ast.hma')));
-  page = fill(page, '__CLJ__', JSON.stringify(read('examples/collatz.hma')));
-  page = fill(page, '__INTEROP__', JSON.stringify(read('examples/interop.hma')));
-  page = fill(page, '__MANDELBROT__', JSON.stringify(read('examples/mandelbrot.hma')));
-  page = fill(page, '__MANDELZOOM__', JSON.stringify(read('examples/mandelzoom.hma')));
-  page = fill(page, '__DEEPZOOM__', JSON.stringify(read('examples/deepzoom.hma')));
-  page = fill(page, '__GPT__', JSON.stringify(read('examples/gpt.hma')));
+  // the lookup path, embedded: (use …) in the tab resolves against these
+  const raw = (f: string) => readFileSync(p(f), 'utf8');
+  page = fill(
+    page,
+    '__LIBS__',
+    JSON.stringify({
+      'prelude.hma': raw('src/hotglue/prelude.hma'),
+      'clj.hma': raw('src/hotglue/clj.hma'),
+    }),
+  );
+  // examples arrive verbatim — their (use …) lines resolve in the tab
+  page = fill(page, '__FIZZBUZZ__', JSON.stringify(raw('examples/fizzbuzz.hma')));
+  page = fill(page, '__GC_AST__', JSON.stringify(raw('examples/gc-ast.hma')));
+  page = fill(page, '__CLJ__', JSON.stringify(raw('examples/collatz.hma')));
+  page = fill(page, '__INTEROP__', JSON.stringify(raw('examples/interop.hma')));
+  page = fill(page, '__MANDELBROT__', JSON.stringify(raw('examples/mandelbrot.hma')));
+  page = fill(page, '__MANDELZOOM__', JSON.stringify(raw('examples/mandelzoom.hma')));
+  page = fill(page, '__DEEPZOOM__', JSON.stringify(raw('examples/deepzoom.hma')));
+  page = fill(page, '__GPT__', JSON.stringify(raw('examples/gpt.hma')));
   // the oyster's weights ride along gzipped; the tab inflates them itself
   let oyster = '';
   try {

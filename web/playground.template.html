@@ -29,7 +29,7 @@
 <body>
 <header>
   <h1>hot glue <span class="pearl">⌾</span> playground</h1>
-  <p>everything runs in this tab — the expander and the assembler are WebAssembly modules that built each other; the C and Rust guests were compiled from the wilderness</p>
+  <p>everything runs in this tab — the same hotglue.wasm as the terminal, holding the expander and assembler that built each other as imported modules; (use …) resolves against a lookup path embedded in the page; the C and Rust guests were compiled from the wilderness</p>
 </header>
 <div class="bar">
   <select id="example"><option>fizzbuzz</option><option>gc-ast</option><option>clojure</option><option>interop</option><option>mandelbrot</option><option>mandelzoom</option><option>deepzoom</option><option>gpt</option></select>
@@ -46,8 +46,10 @@
 <script>
 const EXPAND_B64 = "__EXPAND_B64__";
 const AS_B64 = "__AS_B64__";
+const GLUE_B64 = "__GLUE_B64__";
 const C_B64 = "__C_B64__";
 const RUST_B64 = "__RUST_B64__";
+const LIBS = __LIBS__;
 const EXAMPLES = {
   "fizzbuzz": __FIZZBUZZ__,
   "gc-ast": __GC_AST__,
@@ -64,7 +66,75 @@ const $ = (id) => document.getElementById(id);
 const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const enc = new TextEncoder(), dec = new TextDecoder();
 
-let expandMod, asMod, nativeNs, lastMod, lastY4M, oysterNpt;
+let expandMod, asMod, glueMod, nativeNs, lastMod, lastY4M, oysterNpt;
+
+// The tab runs the same hotglue.wasm as the terminal: the expander
+// and assembler are instantiated as reactors and handed to the
+// driver as its imported modules; (use …) resolves against LIBS —
+// the embedded lookup path; the textarea is stdin; stdout is the
+// binary. The WAT pane reads straight out of the expander instance
+// the driver drove.
+async function glueCompile(sourceText) {
+  expandMod ??= await WebAssembly.compile(b64(EXPAND_B64));
+  asMod ??= await WebAssembly.compile(b64(AS_B64));
+  glueMod ??= await WebAssembly.compile(b64(GLUE_B64));
+  const stub = { wasi_snapshot_preview1: { fd_read: () => 8, fd_write: () => 8 } };
+  const ex = await WebAssembly.instantiate(expandMod, stub);
+  const asm = await WebAssembly.instantiate(asMod, stub);
+  const stdin = enc.encode(sourceText);
+  const outs = [], errs = [];
+  let stdinPos = 0, nextFd = 100, inst;
+  const vfds = new Map();
+  const dv = () => new DataView(inst.exports.memory.buffer);
+  const u8 = () => new Uint8Array(inst.exports.memory.buffer);
+  const wasi = {
+    args_sizes_get(pc, ps) { dv().setUint32(pc, 1, true); dv().setUint32(ps, 0, true); return 0; },
+    args_get() { return 0; },
+    path_open(dirfd, df, pp, pl, of, rb, ri, ff, res) {
+      const name = dec.decode(u8().slice(pp, pp + pl));
+      if (!(name in LIBS)) return 44;
+      const fd = nextFd++;
+      vfds.set(fd, { bytes: enc.encode(LIBS[name]), pos: 0 });
+      dv().setUint32(res, fd, true);
+      return 0;
+    },
+    fd_read(fd, iovs, cnt, pn) {
+      const base = dv().getUint32(iovs, true), len = dv().getUint32(iovs + 4, true);
+      const f = fd === 0 ? { bytes: stdin, pos: stdinPos } : vfds.get(fd);
+      if (!f) return 8;
+      const n = Math.min(len, f.bytes.length - f.pos);
+      u8().set(f.bytes.subarray(f.pos, f.pos + n), base);
+      f.pos += n;
+      if (fd === 0) stdinPos = f.pos;
+      dv().setUint32(pn, n, true);
+      return 0;
+    },
+    fd_close(fd) { vfds.delete(fd); return 0; },
+    fd_write(fd, iovs, cnt, pn) {
+      const base = dv().getUint32(iovs, true), len = dv().getUint32(iovs + 4, true);
+      (fd === 2 ? errs : outs).push(u8().slice(base, base + len));
+      dv().setUint32(pn, len, true);
+      return 0;
+    },
+  };
+  inst = await WebAssembly.instantiate(glueMod, {
+    wasi_snapshot_preview1: wasi, expand: ex.exports, as: asm.exports });
+  try {
+    inst.exports._start();
+  } catch (e) {
+    throw errs.length ? new Error(dec.decode(concat(errs))) : e;
+  }
+  const wat = new Uint8Array(ex.exports.outlen());
+  for (let i = 0; i < wat.length; i++) wat[i] = ex.exports.out(i);
+  return { wat: dec.decode(wat), bin: concat(outs) };
+}
+
+function concat(parts) {
+  const r = new Uint8Array(parts.reduce((a, b) => a + b.length, 0));
+  let o = 0;
+  for (const b of parts) { r.set(b, o); o += b.length; }
+  return r;
+}
 
 // the oyster's weights, inflated once — a byte-GPT that read this repo's prose
 async function oyster() {
@@ -147,13 +217,9 @@ async function run() {
   $("transcode").hidden = true;
   lastMod = lastY4M = undefined;
   try {
-    status.textContent = "expanding…";
-    expandMod ??= await WebAssembly.compile(b64(EXPAND_B64));
-    asMod ??= await WebAssembly.compile(b64(AS_B64));
-    const wat = (await wasiInstance(expandMod, enc.encode($("src").value))).run();
-    $("wat").textContent = dec.decode(wat);
-    status.textContent = "assembling…";
-    const bin = (await wasiInstance(asMod, wat)).run();
+    status.textContent = "hotglue.wasm compiles, inside this tab…";
+    const { wat, bin } = await glueCompile($("src").value);
+    $("wat").textContent = wat;
     const isGpt = $("example").value === "gpt";
     status.textContent = isGpt ? "the oyster is thinking…" : "running…";
     const input = isGpt ? await gptStdin() : new Uint8Array(0);
