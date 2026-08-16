@@ -14,7 +14,7 @@
 //   node scripts/projector.mjs film.wasm [--preload NS=file.wasm]...
 //   HOTGLUE_DIST=dist/hotglue   where the bootstrap artifacts live
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -40,17 +40,20 @@ const dir = mkdtempSync(join(tmpdir(), 'projector-'));
 
 const filmMod = new WebAssembly.Module(readFileSync(filmPath));
 
-function moduleFor(ns) {
-  if (preloads.has(ns)) return new WebAssembly.Module(readFileSync(preloads.get(ns)));
-  if (!ns.endsWith('.hma')) throw new Error(`projector: no module for import namespace ${ns}`);
-  const bin = execFileSync(
+function compileHma(ns) {
+  return execFileSync(
     wasmtime,
     ['--dir', 'src/hotglue', '--dir', 'examples', '--dir', '.',
      '--preload', `expand=${dist}/expand.wasm`, '--preload', `as=${dist}/as.wasm`,
      `${dist}/hotglue.wasm`, ns],
     { maxBuffer: 1 << 26 },
   );
-  return new WebAssembly.Module(bin);
+}
+
+function moduleFor(ns) {
+  if (preloads.has(ns)) return new WebAssembly.Module(readFileSync(preloads.get(ns)));
+  if (!ns.endsWith('.hma')) throw new Error(`projector: no module for import namespace ${ns}`);
+  return new WebAssembly.Module(compileHma(ns));
 }
 
 const stub = { wasi_snapshot_preview1: { fd_read: () => 8, fd_write: () => 8 } };
@@ -63,9 +66,31 @@ const run = (cmd, a, env = {}) =>
 let pending = Buffer.alloc(0);
 const inputs = [];
 
+// Perl runs under wasmtime itself: a Hot Glue supervisor drives the
+// zeroperl reactor, compiled on demand like any filter. Perl wants a
+// /dev/null; it gets an empty one to shout into.
+let perlDriver;
+function perlUnderWasmtime(script) {
+  if (!perlDriver) {
+    perlDriver = { drv: join(dir, 'perl-driver.wasm'), env: join(dir, 'envstub.wasm'), dev: join(dir, 'dev') };
+    writeFileSync(perlDriver.drv, compileHma('examples/perl-driver.hma'));
+    writeFileSync(perlDriver.env, compileHma('examples/envstub.hma'));
+    mkdirSync(perlDriver.dev, { recursive: true });
+    writeFileSync(join(perlDriver.dev, 'null'), '');
+  }
+  return execFileSync(
+    wasmtime,
+    ['--dir', '.', '--dir', `${perlDriver.dev}::/dev`,
+     '--preload', `env=${perlDriver.env}`,
+     '--preload', 'zeroperl=node_modules/@6over3/zeroperl-ts/dist/esm/zeroperl.wasm',
+     perlDriver.drv],
+    { input: script, maxBuffer: 1 << 26 },
+  );
+}
+
 const host = {
   perl(pp, pl) {
-    pending = run('node', ['scripts/zeroperl-run.mjs', str(pp, pl)]);
+    pending = perlUnderWasmtime(str(pp, pl));
     console.log(`  perl wrote ${pending.length} characters in the sandbox`);
     return pending.length;
   },

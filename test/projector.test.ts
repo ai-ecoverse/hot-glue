@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { compile, loadSource, read, Sym } from '../../src/hotglue/bootstrap.js';
@@ -128,12 +128,29 @@ describe('the film is a program; the projector is a lamp', () => {
     expect(inputs[1].bytes.length).toBe(44 + 4800 * 2); // 16-bit samples behind the canonical header
   });
 
-  it('perl writes the narration inside wasm', async () => {
-    const { ZeroPerl } = await import('@6over3/zeroperl-ts');
-    let out = '';
-    const perl = await ZeroPerl.create({ stdout: (s: string) => (out += s) });
-    await perl.eval(readFileSync('examples/narration.pl', 'utf8'));
-    perl.flush();
+  it.skipIf(!runtime)('perl runs under pure wasmtime, a Hot Glue supervisor driving zeroperl', () => {
+    const asWat = join(dir, 'as.wat');
+    const build = (entry: string, out: string) =>
+      writeFileSync(
+        out,
+        execFileSync(runtime!, ['run', '--invoke', 'run', asWat], {
+          input: compile(loadSource([entry])),
+          maxBuffer: 1 << 26,
+        }),
+      );
+    const drv = join(dir, 'perl-driver.wasm');
+    const env = join(dir, 'envstub.wasm');
+    build('examples/perl-driver.hma', drv);
+    build('examples/envstub.hma', env);
+    const dev = join(dir, 'dev');
+    mkdirSync(dev, { recursive: true });
+    writeFileSync(join(dev, 'null'), '');
+    const out = execFileSync(
+      runtime!,
+      ['--dir', '.', '--dir', `${dev}::/dev`, '--preload', `env=${env}`,
+       '--preload', 'zeroperl=node_modules/@6over3/zeroperl-ts/dist/esm/zeroperl.wasm', drv],
+      { input: 'examples/narration.pl', maxBuffer: 1 << 24 },
+    ).toString();
     expect(out).toContain('WebGPU');
     expect(out).toContain('Perl wrote this sentence');
     expect(out).toMatch(/\d+ thousand/); // Perl did arithmetic, as Perl does

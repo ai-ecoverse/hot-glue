@@ -688,7 +688,9 @@
   ;; a field's signature, or -1 if it declares no function
   (func $field-sig (param $f i32) (result i32)
     ($when (call $his (local.get $f) "import")
-      (return (call $sig-key ($nth (local.get $f) 3))))
+      ($when (call $his ($nth (local.get $f) 3) "func")
+        (return (call $sig-key ($nth (local.get $f) 3))))
+      (return (i32.const -1)))
     ($when (call $his (local.get $f) "func")
       (return (call $sig-key (local.get $f))))
     (i32.const -1))
@@ -714,7 +716,8 @@
   (func $func-index (param $mod i32) (param $s i32) (result i32)
     ($let (($i (i32.const 0)))
       ($each-field (local.get $mod) $f
-        ($when (call $his (local.get $f) "import")
+        ($when ($and (call $his (local.get $f) "import")
+                     (call $his ($nth (local.get $f) 3) "func"))
           ($when (call $sym-eq ($nth ($nth (local.get $f) 3) 1) (local.get $s))
             (return (local.get $i)))
           ($inc! $i 1))
@@ -992,12 +995,18 @@
           (local.set $d ($nth (local.get $f) 3))
           (call $lenbytes! (local.get $v) ($a (local.get $m)) ($b (local.get $m)))
           (call $lenbytes! (local.get $v) ($a (local.get $nm)) ($b (local.get $nm)))
-          (call $byte! (local.get $v) (i32.const 0))
-          ($let (($tr (call $func-type-ref (local.get $d))))
-            (if (local.get $tr)
-              (then (call $uleb! (local.get $v) (call $type-index (local.get $mod) (local.get $tr))))
-              (else (call $uleb! (local.get $v)
-                      (call $sig-index (local.get $mod) (call $sig-key (local.get $d)))))))))
+          (if (call $his (local.get $d) "memory")
+            (then
+              (call $byte! (local.get $v) (i32.const 2))
+              (call $byte! (local.get $v) (i32.const 0))
+              (call $uleb! (local.get $v) ($a ($nth (local.get $d) 1))))
+            (else
+              (call $byte! (local.get $v) (i32.const 0))
+              ($let (($tr (call $func-type-ref (local.get $d))))
+                (if (local.get $tr)
+                  (then (call $uleb! (local.get $v) (call $type-index (local.get $mod) (local.get $tr))))
+                  (else (call $uleb! (local.get $v)
+                          (call $sig-index (local.get $mod) (call $sig-key (local.get $d)))))))))))
       (local.get $v)))
 
   (func $func-sec (param $mod i32) (result i32)
@@ -1033,11 +1042,16 @@
     ($let (($n (i32.const 0)) ($v (i32.const 0)) ($fi (i32.const 0)) ($e (i32.const 0)))
       ($each-field (local.get $mod) $f
         ($when ($or (call $his (local.get $f) "func") (call $his (local.get $f) "memory"))
-          ($when (call $inline-export (local.get $f)) ($inc! $n 1))))
+          ($when (call $inline-export (local.get $f)) ($inc! $n 1)))
+        ($when (call $his (local.get $f) "export") ($inc! $n 1)))
       ($when (i32.eqz (local.get $n)) (return (i32.const 0)))
       (local.set $v (call $vec-new (i32.const 64)))
       (call $uleb! (local.get $v) (local.get $n))
-      (local.set $fi (call $nfields (local.get $mod) "import"))
+      (local.set $fi (i32.const 0))
+      ($each-field (local.get $mod) $g
+        ($when ($and (call $his (local.get $g) "import")
+                     (call $his ($nth (local.get $g) 3) "func"))
+          ($inc! $fi 1)))
       ($each-field (local.get $mod) $g
         ($when (call $his (local.get $g) "memory")
           (local.set $e (call $inline-export (local.get $g)))
@@ -1051,7 +1065,14 @@
             (call $lenbytes! (local.get $v) ($a (local.get $e)) ($b (local.get $e)))
             (call $byte! (local.get $v) (i32.const 0))
             (call $uleb! (local.get $v) (local.get $fi)))
-          ($inc! $fi 1)))
+          ($inc! $fi 1))
+        ;; a standalone (export "name" (memory N)) — re-exporting an
+        ;; imported memory, so WASI will speak to a memory-less guest
+        ($when (call $his (local.get $g) "export")
+          ($let (($xn ($nth (local.get $g) 1)) ($xd ($nth (local.get $g) 2)))
+            (call $lenbytes! (local.get $v) ($a (local.get $xn)) ($b (local.get $xn)))
+            (call $byte! (local.get $v) (i32.const 2))
+            (call $uleb! (local.get $v) ($a ($nth (local.get $xd) 1))))))
       (local.get $v)))
 
   (func $code-sec (param $mod i32) (result i32)

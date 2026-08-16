@@ -1,0 +1,7 @@
+;; envstub.hma — the one hook zeroperl wants from a JavaScript host,
+;; declined politely. Host-registered functions do not exist under a
+;; pure runtime, and a plain Perl script never calls one. Five lines
+;; of Hot Glue stand where a JS wrapper stood.
+(module
+  (func (export "call_host_function") (param $a i32) (param $b i32) (param $c i32) (result i32)
+    (i32.const 1)))
