@@ -127,6 +127,25 @@ const host = {
   },
   gpu(sp, sl, frames) {
     const out = join(dir, 'frames.rgb');
+    // GPU_WASI=1 dispatches through wasi:webgpu instead of a browser:
+    // the mandel component under the wasi-gfx runtime (an extended
+    // wasmtime carrying wgpu-core), headless on whatever Vulkan
+    // answers — lavapipe will do. Build with
+    // scripts/build-mandel-webgpu.sh, or point WASI_GFX_RUNTIME at
+    // an existing checkout.
+    if (process.env.GPU_WASI) {
+      const rt = process.env.WASI_GFX_RUNTIME ?? 'tools/mandel-webgpu/wasi-gfx-runtime';
+      const cmd = [join(rt, 'target/debug/runtime'), '--example', 'mandel'];
+      if (!process.env.DISPLAY) cmd.unshift('xvfb-run', '-a');
+      run(cmd[0], cmd.slice(1), {
+        GFX_SHADER: str(sp, sl), GFX_FRAMES: String(frames), GFX_OUT: out,
+        GFX_ONESHOT: '1', GFX_COMPONENT: join(rt, 'target/example-mandel.wasm'),
+        RUST_LOG: 'error',
+      });
+      pending = readFileSync(out);
+      console.log(`  wasi:webgpu rendered ${pending.length / 196608} frames under the wasi-gfx runtime`);
+      return pending.length;
+    }
     run('node', ['scripts/gpu-render.mjs'], { SHADER: str(sp, sl), FRAMES: String(frames), OUT: out });
     pending = readFileSync(out);
     console.log(`  webgpu rendered ${pending.length / 196608} frames`);

@@ -18,6 +18,10 @@ function probe(bins: string[], flag: string): string | null {
 }
 const runtime = probe(['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')], '--version');
 const chromium = existsSync('/opt/pw-browsers/chromium');
+// the wasi:webgpu path: scripts/build-mandel-webgpu.sh, or WASI_GFX_RUNTIME
+const gfxRuntime = process.env.WASI_GFX_RUNTIME ?? 'tools/mandel-webgpu/wasi-gfx-runtime';
+const gfx = existsSync(join(gfxRuntime, 'target/debug/runtime')) &&
+  existsSync(join(gfxRuntime, 'target/example-mandel.wasm'));
 
 const dir = mkdtempSync(join(tmpdir(), 'hotglue-projector-'));
 
@@ -203,6 +207,31 @@ describe('the film is a program; the projector is a lamp', () => {
       const y4m = execFileSync(runtime!, [wat], { input: f, maxBuffer: 1 << 26 });
       expect(y4m.subarray(0, 9).toString()).toBe('YUV4MPEG2');
       expect(y4m.length).toBe(39 + 6 + 3 * 65536);
+    },
+    300000,
+  );
+
+  it.skipIf(!gfx)(
+    'wasi:webgpu renders the same frame with no browser in the room',
+    () => {
+      const rgb = join(dir, 'frame-wasi.rgb');
+      const cmd = [join(gfxRuntime, 'target/debug/runtime'), '--example', 'mandel'];
+      if (!process.env.DISPLAY) cmd.unshift('xvfb-run', '-a');
+      execFileSync(cmd[0], cmd.slice(1), {
+        env: {
+          ...process.env,
+          GFX_SHADER: 'examples/mandel.wgsl', GFX_FRAMES: '1', GFX_OUT: rgb,
+          GFX_ONESHOT: '1', GFX_COMPONENT: join(gfxRuntime, 'target/example-mandel.wasm'),
+          RUST_LOG: 'error',
+        },
+        stdio: 'pipe',
+        timeout: 300000,
+      });
+      const f = readFileSync(rgb);
+      expect(f.length).toBe(256 * 256 * 3);
+      const px = (x: number, y: number) => f.subarray((y * 256 + x) * 3, (y * 256 + x) * 3 + 3);
+      expect([...px(128, 128)]).toEqual([0, 0, 0]); // same set, no tab
+      expect(px(0, 0)[0]).toBeGreaterThan(0);
     },
     300000,
   );

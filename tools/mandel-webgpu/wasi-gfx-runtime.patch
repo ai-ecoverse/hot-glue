@@ -1,0 +1,132 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index a206536..b0e1bd7 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1855,6 +1855,13 @@ dependencies = [
+  "syn",
+ ]
+ 
++[[package]]
++name = "mandel"
++version = "0.1.0"
++dependencies = [
++ "wit-bindgen 0.57.1",
++]
++
+ [[package]]
+ name = "maybe-owned"
+ version = "0.3.4"
+diff --git a/Cargo.toml b/Cargo.toml
+index c0d3946..3e2ebb0 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -9,6 +9,7 @@ members = [
+     "examples/apps/triangle",
+     "examples/apps/skybox",
+     "examples/apps/hello_compute",
++    "examples/apps/mandel",
+     "examples/runtime",
+ ]
+ 
+diff --git a/examples/runtime/src/main.rs b/examples/runtime/src/main.rs
+index fa601e9..58bad37 100644
+--- a/examples/runtime/src/main.rs
++++ b/examples/runtime/src/main.rs
+@@ -58,6 +58,7 @@ impl HostState {
+             table: ResourceTable::new(),
+             instance: Arc::clone(&self.instance),
+             main_thread_proxy: Arc::clone(&self.main_thread_proxy),
++            frame_sink: None,
+         }
+     }
+ }
+@@ -66,6 +67,7 @@ struct WorkloadState {
+     table: ResourceTable,
+     instance: Arc<wgpu_core::global::Global>,
+     main_thread_proxy: Arc<WasiWinitEventLoopProxy>,
++    frame_sink: Option<std::fs::File>,
+ }
+ 
+ impl wasmtime::component::HasData for WorkloadState {
+@@ -123,6 +125,30 @@ impl ExampleImports for WorkloadState {
+     fn print(&mut self, s: String) {
+         println!("{s}");
+     }
++
++    fn shader_source(&mut self) -> String {
++        let path =
++            std::env::var("GFX_SHADER").unwrap_or_else(|_| "examples/mandel.wgsl".to_string());
++        std::fs::read_to_string(&path)
++            .unwrap_or_else(|e| panic!("GFX_SHADER {path} unreadable: {e}"))
++    }
++
++    fn frame_count(&mut self) -> u32 {
++        std::env::var("GFX_FRAMES")
++            .ok()
++            .and_then(|v| v.parse().ok())
++            .unwrap_or(150)
++    }
++
++    fn emit_frame(&mut self, pixels: Vec<u8>) {
++        use std::io::Write;
++        let sink = self.frame_sink.get_or_insert_with(|| {
++            let path = std::env::var("GFX_OUT").unwrap_or_else(|_| "frames.rgb".to_string());
++            std::fs::File::create(&path)
++                .unwrap_or_else(|e| panic!("GFX_OUT {path} unwritable: {e}"))
++        });
++        sink.write_all(&pixels).unwrap();
++    }
+ }
+ 
+ #[tokio::main]
+@@ -152,7 +178,8 @@ async fn main() -> anyhow::Result<()> {
+ 
+     let mut store = Store::new(&engine, workload_state);
+ 
+-    let wasm_path = format!("./target/example-{}.wasm", args.example);
++    let wasm_path = std::env::var("GFX_COMPONENT")
++        .unwrap_or_else(|_| format!("./target/example-{}.wasm", args.example));
+ 
+     let component =
+         Component::from_file(&engine, &wasm_path).context("Component file not found")?;
+@@ -163,6 +190,10 @@ async fn main() -> anyhow::Result<()> {
+ 
+     tokio::spawn(async move {
+         instance.func_start().call_async(store, ()).await.unwrap();
++        // headless one-shot runs: don't let the event loop linger
++        if std::env::var("GFX_ONESHOT").is_ok() {
++            std::process::exit(0);
++        }
+     });
+ 
+     main_thread_loop.run();
+diff --git a/examples/wit/example.wit b/examples/wit/example.wit
+index 29b3941..e6f290f 100644
+--- a/examples/wit/example.wit
++++ b/examples/wit/example.wit
+@@ -12,4 +12,13 @@ world example {
+ 
+     /// print to stdout
+     import print: func(s: string);
++
++    /// WGSL source supplied by the host (mandel demo)
++    import shader-source: func() -> string;
++
++    /// how many frames the host wants (mandel demo)
++    import frame-count: func() -> u32;
++
++    /// hand one rendered frame (raw RGB24 bytes) back to the host
++    import emit-frame: func(pixels: list<u8>);
+ }
+diff --git a/xtask/src/run_demo.rs b/xtask/src/run_demo.rs
+index 7ee6d5a..7b49db5 100644
+--- a/xtask/src/run_demo.rs
++++ b/xtask/src/run_demo.rs
+@@ -11,6 +11,7 @@ lazy_static::lazy_static! {
+         s.insert("triangle");
+         s.insert("rectangle_simple_buffer");
+         s.insert("hello_compute");
++        s.insert("mandel");
+         s
+     };
+ }
