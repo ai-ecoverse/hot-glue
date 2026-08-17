@@ -6,8 +6,26 @@ use tract_onnx::prelude::*;
 fn main() -> TractResult<()> {
     let path = std::env::args().nth(1).unwrap_or("models/kokoro/onnx/model_quantized.onnx".into());
     eprintln!("loading {path}…");
-    let tokens: Vec<i64> = vec![0, 50, 83, 54, 156, 57, 135, 0];
+    // tokens: PHONEMES env (IPA, as espeak prints it) through the
+    // tokenizer vocabulary, zero-padded at both ends; or a fixed
+    // babble when unset
+    let tokens: Vec<i64> = if let Ok(ph) = std::env::var("PHONEMES") {
+        let tok: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string("models/kokoro/tokenizer.json")?)?;
+        let vocab = &tok["model"]["vocab"];
+        let mut ids = vec![0i64];
+        for c in ph.trim().chars() {
+            if let Some(id) = vocab[c.to_string()].as_i64() {
+                ids.push(id);
+            }
+        }
+        ids.push(0);
+        ids
+    } else {
+        vec![0, 50, 83, 54, 156, 57, 135, 0]
+    };
     let t = tokens.len();
+    eprintln!("tokens: {t}");
     let mut model = tract_onnx::onnx().model_for_path(&path)?;
     if let Ok(probes) = std::env::var("PROBES") {
         let names: Vec<&str> = probes.split(',').collect();
