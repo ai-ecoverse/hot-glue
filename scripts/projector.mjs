@@ -14,7 +14,7 @@
 //   node scripts/projector.mjs film.wasm [--preload NS=file.wasm]...
 //   HOTGLUE_DIST=dist/hotglue   where the bootstrap artifacts live
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -95,6 +95,28 @@ const host = {
     return pending.length;
   },
   speak(tp, tl, vp, vl) {
+    // SPEAK_WASI=1 runs the whole voice under wasmtime: espeak-ng
+    // (WASI) phonemizes, Kokoro-82M under patched tract synthesizes.
+    // An order of magnitude slower than the Chromium tab, and pure.
+    // Needs: KOKORO_TRACT_WASM (see tools/kokoro-tract) and
+    // models/kokoro/onnx/model-fixed.onnx (scripts/fix-kokoro-onnx.py).
+    if (process.env.SPEAK_WASI) {
+      const dataDir = process.env.ESPEAK_DATA ?? '/usr/lib/x86_64-linux-gnu';
+      const phonemes = execFileSync(
+        wasmtime,
+        ['--dir', dataDir, 'examples/native/espeak.wasm', dataDir, 'en-us'],
+        { input: str(tp, tl), maxBuffer: 1 << 20 },
+      ).toString().trim();
+      console.log(`  espeak, compiled to wasi, wrote ${phonemes.length} phonemes under wasmtime`);
+      const out = 'wasi-voice.f32';
+      run(wasmtime, ['--dir', '.', '--env', 'PHONEMES',
+        process.env.KOKORO_TRACT_WASM ?? 'tools/kokoro-tract/target/wasm32-wasip1/release/kokoro-tract.wasm',
+        'models/kokoro/onnx/model-fixed.onnx', out], { PHONEMES: phonemes });
+      pending = readFileSync(out);
+      unlinkSync(out);
+      console.log(`  kokoro, under patched tract, spoke ${(pending.length / 4 / 24000).toFixed(1)}s under wasmtime`);
+      return pending.length;
+    }
     const out = join(dir, 'voice.f32');
     run('node', ['scripts/kokoro-voice.mjs'], {
       TEXT: str(tp, tl), VOICE: str(vp, vl), OUT: out,

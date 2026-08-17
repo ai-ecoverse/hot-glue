@@ -16,6 +16,7 @@ edition = "2021"
 
 [dependencies]
 tract-onnx = { path = "../tract/onnx" }
+serde_json = "1"
 
 [profile.release]
 opt-level = 2
