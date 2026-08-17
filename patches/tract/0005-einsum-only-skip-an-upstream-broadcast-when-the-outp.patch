@@ -1,0 +1,37 @@
+From c6834115706ba7d9968e530112422eee47442335 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 17 Aug 2026 07:10:16 +0000
+Subject: [PATCH 5/6] einsum: only skip an upstream broadcast when the output
+ fact survives
+
+declutter_broadcast bypasses a MultiBroadcastTo feeding an einsum,
+betting on the einsum's internal broadcasting. That is unsound when
+a broadcast axis flows to the output from that input alone: the
+output extent shrinks to the pre-broadcast size and the patch fails
+to substitute (seen on Kokoro-82M, where a 1x1-conv einsum consumes
+a nearest-upsample implemented as broadcast+collapse). Wire the
+candidate patch and decline unless its output shape matches.
+---
+ core/src/ops/einsum/mod.rs | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/core/src/ops/einsum/mod.rs b/core/src/ops/einsum/mod.rs
+index c35791d..b3888fa 100644
+--- a/core/src/ops/einsum/mod.rs
++++ b/core/src/ops/einsum/mod.rs
+@@ -516,6 +516,12 @@ fn declutter_broadcast(
+             let mut wires = patch.taps(model, &node.inputs)?;
+             wires[ix] = patch.tap_model(model, prec.inputs[0])?;
+             let wire = patch.wire_node(&node.name, op.clone(), &wires)?[0];
++            // skipping the broadcast is only sound if the einsum recovers
++            // the broadcast extents elsewhere: a broadcast axis that flows
++            // to the output from this input alone would shrink it
++            if patch.outlet_fact(wire)?.shape != node.outputs[0].fact.shape {
++                continue;
++            }
+             patch.shunt_outside(model, node.id.into(), wire)?;
+             return Ok(Some(patch));
+         }
+-- 
+2.43.0
+
