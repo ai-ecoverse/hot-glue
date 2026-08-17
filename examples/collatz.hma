@@ -1,0 +1,40 @@
+;; collatz.hma — the Clojure accent on bare metal.
+;;
+;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/collatz.hma > collatz.wat
+;;   wasmtime run --invoke steps collatz.wat 27        ;; 111
+;;   wasmtime run --invoke sum-squares collatz.wat     ;; 285
+
+(use clj.hma)
+
+(module
+  (comment
+    loop recur threading flat-let-bindings and arithmetic that wraps
+    its own constants. The parentheses were always here. The brackets
+    are new.)
+
+  (func (export "steps") (param $n i32) (result i32)
+    ($loop [$x (local.get $n) $count 0]
+      ($if (= (local.get $x) 1)
+           (local.get $count)
+           (recur ($if (zero? (rem (local.get $x) 2))
+                       (quot (local.get $x) 2)
+                       (+ (* 3 (local.get $x)) 1))
+                  (inc (local.get $count))))))
+
+  (func (export "sum-squares") (result i32)
+    (let [$acc 0]
+      (dotimes [$i 10]
+        (local.set $acc (+ (local.get $acc) (* (local.get $i) (local.get $i)))))
+      (local.get $acc)))
+
+  (func (export "classify") (param $n i32) (result i32)
+    (cond (neg? (local.get $n)) (- 0 1)
+          (zero? (local.get $n)) 0
+          :else 1))
+
+  (func (export "thread") (param $n i32) (result i32)
+    (-> (local.get $n)
+        (+ 1)
+        (* 2)
+        (- 3)
+        inc)))

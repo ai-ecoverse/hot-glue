@@ -1,0 +1,129 @@
+;; deepzoom.hma — floating point arrived; the dive goes to the floor.
+;;
+;; Two hundred frames of f64 descent toward the seahorse valley at
+;; (-0.743643887037151, 0.131825904205330), a million-fold zoom that
+;; ten fixed-point bits could never survive. Same Y4M pipeline as
+;; mandelzoom, so ffmpeg needs no flags:
+;;
+;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/deepzoom.hma > deepzoom.wat
+;;   wasmtime deepzoom.wat | ffmpeg -i - deepzoom.mp4
+;;
+;; Floats put this module in explicit-type territory: signatures that
+;; mention f64 declare themselves. The literals travel through the
+;; expander as text — hygiene never looks inside a number — and the
+;; assembler mints their IEEE bits at the very end.
+
+(use clj.hma)
+
+(module
+  (type $q-v (func))
+  (type $q-i (func (result i32)))
+  (type $q-ii-v (func (param i32 i32)))
+  (type $q-i-i (func (param i32) (result i32)))
+  (type $q-iiii-i (func (param i32 i32 i32 i32) (result i32)))
+  (type $q-ff-i (func (param f64 f64) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (type $q-iiii-i)))
+  (memory (export "memory") 16)
+
+  (func $iters (type $q-ff-i) (param $cx f64) (param $cy f64) (result i32)
+    (local $zx f64)
+    (local $zy f64)
+    (local $t f64)
+    (let [$i 0]
+      (while (and (< (local.get $i) 128)
+                  (f64.le (f64.add (f64.mul (local.get $zx) (local.get $zx))
+                                   (f64.mul (local.get $zy) (local.get $zy)))
+                          (f64.const 4)))
+        (local.set $t (f64.add (f64.sub (f64.mul (local.get $zx) (local.get $zx))
+                                        (f64.mul (local.get $zy) (local.get $zy)))
+                               (local.get $cx)))
+        (local.set $zy (f64.add (f64.mul (f64.const 2) (f64.mul (local.get $zx) (local.get $zy)))
+                                (local.get $cy)))
+        (local.set $zx (local.get $t))
+        (local.set $i (inc (local.get $i))))
+      (local.get $i)))
+
+  (func $shade (type $q-ii-v) (param $i i32) (param $p i32)
+    (if (= (local.get $i) 128)
+      (then
+        (i32.store8 (local.get $p) (i32.const 0))
+        (i32.store8 (+ (local.get $p) 1) (i32.const 0))
+        (i32.store8 (+ (local.get $p) 2) (i32.const 0)))
+      (else
+        (i32.store8 (local.get $p) (- 255 (bit-and (* 2 (local.get $i)) 255)))
+        (i32.store8 (+ (local.get $p) 1) (bit-and (* 5 (local.get $i)) 255))
+        (i32.store8 (+ (local.get $p) 2) (+ 64 (bit-and (* 3 (local.get $i)) 191))))))
+
+  (func (export "width") (type $q-i) (result i32) (i32.const 256))
+  (func (export "height") (type $q-i) (result i32) (i32.const 256))
+
+  (func $frame (export "frame") (type $q-i-i) (param $n i32) (result i32)
+    (local $span f64)
+    (local $x0 f64)
+    (local $y0 f64)
+    (local $st f64)
+    (local.set $span (f64.const 3.5))
+    (let [$k 0 $px 0 $py 0 $p 65536]
+      (while (< (local.get $k) (local.get $n))
+        (local.set $span (f64.mul (local.get $span) (f64.const 0.933)))
+        (local.set $k (inc (local.get $k))))
+      (local.set $st (f64.div (local.get $span) (f64.const 256)))
+      (local.set $x0 (f64.sub (f64.const -0.743643887037151) (f64.mul (local.get $span) (f64.const 0.5))))
+      (local.set $y0 (f64.sub (f64.const 0.131825904205330) (f64.mul (local.get $span) (f64.const 0.5))))
+      (while (< (local.get $py) 256)
+        (local.set $px (num 0))
+        (while (< (local.get $px) 256)
+          (call $shade
+            (call $iters
+              (f64.add (local.get $x0) (f64.mul (local.get $st) (f64.convert_i32_s (local.get $px))))
+              (f64.add (local.get $y0) (f64.mul (local.get $st) (f64.convert_i32_s (local.get $py)))))
+            (local.get $p))
+          (local.set $p (+ (local.get $p) 3))
+          (local.set $px (inc (local.get $px))))
+        (local.set $py (inc (local.get $py))))
+      (i32.const 65536)))
+
+  ;; a still from far down, for canvas hosts
+  (func (export "render") (type $q-i) (result i32)
+    (call $frame (i32.const 150)))
+
+  (func $convert (type $q-v)
+    (let [$o 0 $p 65536 $r 0 $g 0 $b 0]
+      (while (< (local.get $o) 65536)
+        (local.set $r (i32.load8_u (local.get $p)))
+        (local.set $g (i32.load8_u (+ (local.get $p) 1)))
+        (local.set $b (i32.load8_u (+ (local.get $p) 2)))
+        (i32.store8 (+ 327680 (local.get $o))
+          (bit-shift-right (+ (+ (* 77 (local.get $r)) (* 150 (local.get $g)))
+                              (* 29 (local.get $b)))
+                           8))
+        (i32.store8 (+ 393216 (local.get $o))
+          (+ 128 (bit-shift-right (+ (- (* -43 (local.get $r)) (* 85 (local.get $g)))
+                                     (* 128 (local.get $b)))
+                                  8)))
+        (i32.store8 (+ 458752 (local.get $o))
+          (+ 128 (bit-shift-right (- (- (* 128 (local.get $r)) (* 107 (local.get $g)))
+                                     (* 21 (local.get $b)))
+                                  8)))
+        (local.set $o (inc (local.get $o)))
+        (local.set $p (+ (local.get $p) 3)))))
+
+  (func $put (type $q-ii-v) (param $ptr i32) (param $len i32)
+    (while (> (local.get $len) 0)
+      (i32.store (i32.const 0) (local.get $ptr))
+      (i32.store (i32.const 4) (local.get $len))
+      (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8)))
+      (local.set $ptr (+ (local.get $ptr) (i32.load (i32.const 8))))
+      (local.set $len (- (local.get $len) (i32.load (i32.const 8))))))
+
+  (func (export "_start") (type $q-v)
+    (let [$n 0]
+      (call $put "YUV4MPEG2 W256 H256 F30:1 Ip A1:1 C444\n")
+      (while (< (local.get $n) 200)
+        (drop (call $frame (local.get $n)))
+        (call $convert)
+        (call $put "FRAME\n")
+        (call $put (i32.const 327680) (i32.const 65536))
+        (call $put (i32.const 393216) (i32.const 65536))
+        (call $put (i32.const 458752) (i32.const 65536))
+        (local.set $n (inc (local.get $n)))))))

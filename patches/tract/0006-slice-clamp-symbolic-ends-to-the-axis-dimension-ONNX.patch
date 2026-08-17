@@ -1,0 +1,54 @@
+From fea5c112910c7f50f31b1d69f357a4e85a45d5bb Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 17 Aug 2026 07:10:16 +0000
+Subject: [PATCH 6/6] slice: clamp symbolic ends to the axis dimension (ONNX
+ semantics)
+
+ONNX (and NumPy) slicing clamps out-of-range bounds to the axis
+size; models traced with a dummy length bake short constants and
+slice them with runtime-computed lengths (Kokoro-82M's istft
+window_sum). The concrete path already clamped; do the same for a
+symbolic end by taking min(end, dim), so the declared fact and the
+runtime shape agree, and mirror the clamp in Slice's dynamic eval.
+---
+ core/src/ops/array/slice.rs         | 7 +++++++
+ core/src/ops/array/strided_slice.rs | 5 +++++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/core/src/ops/array/slice.rs b/core/src/ops/array/slice.rs
+index 008abb5..df3d0c9 100644
+--- a/core/src/ops/array/slice.rs
++++ b/core/src/ops/array/slice.rs
+@@ -68,6 +68,13 @@ impl EvalOp for Slice {
+         let input = args_1!(inputs);
+         let start = self.start.eval(&session.resolved_symbols).to_usize()?;
+         let end = self.end.eval(&session.resolved_symbols).to_usize()?;
++        // Symbolic bounds follow ONNX/NumPy semantics: out-of-range
++        // bounds clamp to the axis size. (Models traced with a dummy
++        // length bake short constants and slice them with runtime
++        // lengths; onnxruntime clamps, so must we.)
++        let dim = input.shape()[self.axis];
++        let end = end.min(dim);
++        let start = start.min(end);
+         eval_slice(&input, self.axis, start, end)
+     }
+ }
+diff --git a/core/src/ops/array/strided_slice.rs b/core/src/ops/array/strided_slice.rs
+index 95212b4..de38b02 100644
+--- a/core/src/ops/array/strided_slice.rs
++++ b/core/src/ops/array/strided_slice.rs
+@@ -152,6 +152,11 @@ impl StridedSlice {
+             } else {
+                 return Ok(Dim { begin: 0.to_dim(), end: 0.to_dim(), stride, shrink: false });
+             }
++        } else if stride > 0 && end.as_i64().is_none() {
++            // a symbolic end clamps to the dimension too (ONNX semantics) —
++            // models traced with a dummy length bake short constants and
++            // slice them with runtime-computed lengths
++            end = end.mini(dim.clone());
+         }
+         Ok(Dim { begin, end, stride, shrink: false })
+     }
+-- 
+2.43.0
+

@@ -1,0 +1,31 @@
+;; film.hma — a film, and now also a program.
+;;
+;; Perl (in wasm) writes the narration, Kokoro (in wasm) speaks it,
+;; WebGPU renders the picture, the Hot Glue filters glue pixels and
+;; samples into streams, and ffmpeg (in wasm) cuts the print. This
+;; file compiles like any other Hot Glue program:
+;;
+;;   wasmtime --dir src/hotglue --dir examples \
+;;     --preload expand=expand.wasm --preload as=as.wasm \
+;;     hotglue.wasm film.hma > film.wasm
+;;   node scripts/projector.mjs film.wasm
+;;
+;; The (film …) macro expands this into a module whose filters are
+;; explicitly imported wasm modules — the import namespace is the
+;; filter's source path, so the import section is the manifest — and
+;; whose four capabilities (perl, speak, gpu, cut) are syscall-shaped
+;; host imports. The projector is a lamp: it satisfies imports and
+;; never reads a film.
+
+(use reel.hma)
+
+(film "gpu-perlmutt.mp4"
+  (filter "wav" "examples/wav.hma")
+  (filter "rgb->y4m" "examples/rgb2y4m.hma")
+
+  (let $text (perl "examples/narration.pl"))
+  (let $pcm (speak $text "af_heart"))
+  (let $audio (wav $pcm))
+  (let $rgb (gpu "examples/mandel.wgsl" 150))
+  (let $video (rgb->y4m $rgb))
+  (cut (loop $video) $audio))

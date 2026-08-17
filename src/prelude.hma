@@ -1,0 +1,61 @@
+;; The Hot Glue prelude — the macros the assembler is written with.
+;; All value sugar is i32. The machine beneath speaks nothing else yet.
+
+(defmacro $when (test &rest body)
+  `(if ,test (then ,@body)))
+
+(defmacro $unless (test &rest body)
+  `(if (i32.eqz ,test) (then ,@body)))
+
+(defmacro $while (test &rest body)
+  `(block $break
+     (loop $continue
+       (br_if $break (i32.eqz ,test))
+       ,@body
+       (br $continue))))
+
+;; Bindings. Two elements make an i32; a third slips a type between
+;; name and value: (($n (ref $node) expr)). Declarations hoist;
+;; initialization happens here.
+(defmacro $let (bindings &rest body)
+  `(splice
+     ,@(map (lambda (b)
+              (if (= (length b) 3)
+                  `(local ,(first b) ,(second b))
+                  `(local ,(first b) i32)))
+            bindings)
+     ,@(map (lambda (b)
+              (if (= (length b) 3)
+                  `(local.set ,(first b) ,(second (rest b)))
+                  `(local.set ,(first b) ,(second b))))
+            bindings)
+     ,@body))
+
+;; Expression cond. Every clause yields i32; else is optional but wise.
+(defmacro $cond (&rest clauses)
+  (if (= (length clauses) 0)
+      `(unreachable)
+      (if (sym-is? (first (first clauses)) "else")
+          `(splice ,@(rest (first clauses)))
+          `(if (result i32) ,(first (first clauses))
+             (then ,@(rest (first clauses)))
+             (else ($cond ,@(rest clauses)))))))
+
+;; Short-circuit truthiness, i32 in, i32 out.
+(defmacro $and (a b)
+  `(if (result i32) ,a (then ,b) (else (i32.const 0))))
+
+(defmacro $or (a b)
+  `(if (result i32) ,a (then (i32.const 1)) (else ,b)))
+
+(defmacro $inc! (x n)
+  `(local.set ,x (i32.add (local.get ,x) (i32.const ,n))))
+
+;; Mnemonic table: each entry is (class "name" opcode). The packed
+;; class<<8|opcode constant is computed here, at expansion time.
+(defmacro $ops (p n &rest entries)
+  `(splice
+     ,@(map (lambda (e)
+              `($when (call $str-eq ,p ,n ,(second e))
+                 (return (i32.const ,(+ (* 256 (first e)) (second (rest e)))))))
+            entries)))

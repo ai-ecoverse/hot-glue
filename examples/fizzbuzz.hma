@@ -1,0 +1,63 @@
+;; FizzBuzz. The macros are the argument; the machine is the proof.
+;;
+;;   npx tsx src/hotglue/cli.ts examples/fizzbuzz.hma > /tmp/fizzbuzz.wat
+;;   wasmtime /tmp/fizzbuzz.wat
+;;
+;; Memory: iovec at 0, digit buffer below 24, nwritten at 24.
+;; Hot Glue pools inline strings into data segments from 32 up.
+
+(module
+  (import "wasi_snapshot_preview1" "fd_write"
+    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 1)
+
+  (func $print (param $ptr i32) (param $len i32)
+    (i32.store (i32.const 0) (local.get $ptr))
+    (i32.store (i32.const 4) (local.get $len))
+    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 24))))
+
+  (func $printnum (param $n i32)
+    (local $p i32)
+    (local.set $p (i32.const 24))
+    (loop $digit
+      (local.set $p (i32.sub (local.get $p) (i32.const 1)))
+      (i32.store8 (local.get $p)
+        (i32.add (i32.const 48) (i32.rem_u (local.get $n) (i32.const 10))))
+      (local.set $n (i32.div_u (local.get $n) (i32.const 10)))
+      (br_if $digit (local.get $n)))
+    (call $print (local.get $p) (i32.sub (i32.const 24) (local.get $p))))
+
+  (defmacro $divisible? (n d)
+    `(i32.eqz (i32.rem_u ,n ,d)))
+
+  (defmacro $when (test body)
+    `(if ,test (then ,body)))
+
+  (defmacro $print-if (test str)
+    `($when ,test (call $print ,str)))
+
+  (defmacro $and (a b)
+    `(i32.and (i32.ne ,a (i32.const 0)) (i32.ne ,b (i32.const 0))))
+
+  (defmacro $for (init test step body)
+    `(splice
+       ,init
+       (block $break
+         (loop $continue
+           (br_if $break (i32.eqz ,test))
+           ,body
+           ,step
+           (br $continue)))))
+
+  (func (export "_start")
+    (local $i i32)
+    ($for (local.set $i (i32.const 1))
+          (i32.le_u (local.get $i) (i32.const 100))
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (splice
+        ($print-if ($divisible? (local.get $i) (i32.const 3)) "Fizz")
+        ($print-if ($divisible? (local.get $i) (i32.const 5)) "Buzz")
+        ($when ($and (i32.rem_u (local.get $i) (i32.const 3))
+                     (i32.rem_u (local.get $i) (i32.const 5)))
+          (call $printnum (local.get $i)))
+        (call $print "\n")))))

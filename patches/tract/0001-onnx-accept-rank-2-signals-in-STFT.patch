@@ -1,0 +1,54 @@
+From eb4c1ea4726e28f0ff503e009713ba8e602c6833 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 17 Aug 2026 07:10:16 +0000
+Subject: [PATCH 1/6] onnx: accept rank-2 signals in STFT
+
+The ONNX spec describes the STFT signal as [batch][signal][1 or 2],
+but PyTorch exports rank-2 [batch][signal] real signals and
+onnxruntime accepts them (Kokoro-82M is one such model). Relax the
+inference rule to admit rank 2 or 3, and grow the missing channel
+axis at wire time before the existing add-imaginary padding.
+---
+ onnx/src/ops/fft.rs | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/onnx/src/ops/fft.rs b/onnx/src/ops/fft.rs
+index 0f04ae1..7be7349 100644
+--- a/onnx/src/ops/fft.rs
++++ b/onnx/src/ops/fft.rs
+@@ -294,7 +294,12 @@ impl Expansion for Stft {
+         )?;
+         check_output_arity(outputs, 1)?;
+         s.equals(&inputs[0].datum_type, &outputs[0].datum_type)?;
+-        s.equals(&inputs[0].rank, 3)?;
++        // The spec asks for [batch][signal][1 or 2], but PyTorch exports
++        // (and onnxruntime accepts) a rank-2 [batch][signal] real signal.
++        s.given(&inputs[0].rank, move |_, rank| {
++            ensure!(rank == 2 || rank == 3, "STFT signal must have rank 2 or 3, got {rank}");
++            Ok(())
++        })?;
+         s.equals(&outputs[0].rank, 4)?;
+         s.equals(&outputs[0].shape[0], &inputs[0].shape[0])?;
+         s.equals(&outputs[0].shape[3], 2.to_dim())?;
+@@ -342,8 +347,17 @@ impl Expansion for Stft {
+         model: &mut TypedModel,
+         inputs: &[OutletId],
+     ) -> TractResult<TVec<OutletId>> {
+-        let fact = model.outlet_fact(inputs[0])?.clone();
++        let mut fact = model.outlet_fact(inputs[0])?.clone();
+         let mut wire: TVec<OutletId> = tvec!(inputs[0]);
++        // a rank-2 [batch][signal] real signal grows its channel axis here
++        if fact.rank() == 2 {
++            wire = model.wire_node(
++                format!("{prefix}.add_channel"),
++                tract_hir::tract_core::ops::change_axes::AxisOp::Add(2),
++                &wire,
++            )?;
++            fact = model.outlet_fact(wire[0])?.clone();
++        }
+         let (frame, window) = if let Some(w) = self.optional_window_input {
+             let window = model
+                 .outlet_fact(inputs[w])?
+-- 
+2.43.0
+

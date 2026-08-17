@@ -1,0 +1,203 @@
+;; reel.hma — a film is a program; the projector is merely a lamp.
+;;
+;; The (film …) macro expands a declarative film into a wasm module.
+;; Filters are explicitly imported wasm modules driven through the
+;; byte protocol (begin, in!, go, out) — the import namespace IS the
+;; filter's source path, so the module's own import section is the
+;; manifest and no host ever reads a film. The four capabilities a
+;; sandbox cannot self-supply (perl, speak, gpu, cut) arrive from a
+;; "host" namespace as syscall-shaped functions; buffers travel as
+;; handles — pointers to (ptr, len) cells in this module's memory.
+;;
+;;   (film "out.mp4"
+;;     (filter "wav" "examples/wav.hma")
+;;     (let $text (perl "examples/narration.pl"))
+;;     (let $pcm (speak $text "af_heart"))
+;;     (let $audio (wav $pcm))
+;;     (cut (loop $video) $audio))
+;;
+;; Shared names rendezvous through (unhygienic $reel.*), the same
+;; idiom as clj's recur registers. Up to four filter slots. Slot 12
+;; holds the bump pointer; pooled strings from 32; heap from 65536.
+
+(use prelude.hma)
+
+(defmacro film (out &rest body)
+  `(module
+     (import "host" "perl" (func (unhygienic $reel.perl) (param i32 i32) (result i32)))
+     (import "host" "speak" (func (unhygienic $reel.speak) (param i32 i32 i32 i32) (result i32)))
+     (import "host" "gpu" (func (unhygienic $reel.gpu) (param i32 i32 i32) (result i32)))
+     (import "host" "take" (func (unhygienic $reel.take) (param i32)))
+     (import "host" "input" (func (unhygienic $reel.input) (param i32 i32 i32)))
+     (import "host" "cut" (func (unhygienic $reel.cut) (param i32 i32)))
+     (film-imports 0 ,@body)
+     (memory (export "memory") 16)
+     (func (unhygienic $reel.alloc) (param $n i32) (result i32)
+       ($let (($p (i32.load (i32.const 12))))
+         ($when (i32.eqz (local.get $p)) (local.set $p (i32.const 65536)))
+         (i32.store (i32.const 12)
+           (i32.and (i32.add (i32.add (local.get $p) (local.get $n)) (i32.const 7)) (i32.const -8)))
+         ($while (i32.gt_u (i32.load (i32.const 12)) (i32.mul (memory.size) (i32.const 65536)))
+           (drop (memory.grow (i32.const 16))))
+         (local.get $p)))
+     (func (unhygienic $reel.handle) (param $p i32) (param $n i32) (result i32)
+       ($let (($h (call (unhygienic $reel.alloc) (i32.const 8))))
+         (i32.store (local.get $h) (local.get $p))
+         (i32.store (i32.add (local.get $h) (i32.const 4)) (local.get $n))
+         (local.get $h)))
+     (func (unhygienic $reel.wrap) (param $n i32) (result i32)
+       ($let (($p (call (unhygienic $reel.alloc) (local.get $n))))
+         (call (unhygienic $reel.take) (local.get $p))
+         (call (unhygienic $reel.handle) (local.get $p) (local.get $n))))
+     (film-runners 0 ,@body)
+     (func (export "_start")
+       (film-steps ,out (,@body) ,@body))))
+
+;; ---------------------------------------------- filter import slots
+
+(defmacro film-imports (n &rest body)
+  (if (= (length body) 0)
+      `(splice)
+      (if (sym-is? (first (first body)) "filter")
+          `(splice
+             (film-import-slot ,n ,(second (rest (first body))))
+             (film-imports ,(+ n 1) ,@(rest body)))
+          `(film-imports ,n ,@(rest body)))))
+
+(defmacro film-import-slot (n path)
+  (if (= n 0)
+      `(splice
+         (import ,path "begin" (func (unhygienic $reel.f0.begin) (param i32)))
+         (import ,path "in!" (func (unhygienic $reel.f0.in) (param i32 i32)))
+         (import ,path "go" (func (unhygienic $reel.f0.go) (result i32)))
+         (import ,path "out" (func (unhygienic $reel.f0.out) (param i32) (result i32))))
+      (if (= n 1)
+          `(splice
+             (import ,path "begin" (func (unhygienic $reel.f1.begin) (param i32)))
+             (import ,path "in!" (func (unhygienic $reel.f1.in) (param i32 i32)))
+             (import ,path "go" (func (unhygienic $reel.f1.go) (result i32)))
+             (import ,path "out" (func (unhygienic $reel.f1.out) (param i32) (result i32))))
+          (if (= n 2)
+              `(splice
+                 (import ,path "begin" (func (unhygienic $reel.f2.begin) (param i32)))
+                 (import ,path "in!" (func (unhygienic $reel.f2.in) (param i32 i32)))
+                 (import ,path "go" (func (unhygienic $reel.f2.go) (result i32)))
+                 (import ,path "out" (func (unhygienic $reel.f2.out) (param i32) (result i32))))
+              `(splice
+                 (import ,path "begin" (func (unhygienic $reel.f3.begin) (param i32)))
+                 (import ,path "in!" (func (unhygienic $reel.f3.in) (param i32 i32)))
+                 (import ,path "go" (func (unhygienic $reel.f3.go) (result i32)))
+                 (import ,path "out" (func (unhygienic $reel.f3.out) (param i32) (result i32))))))))
+
+;; ----------------------------------------------- per-slot runners
+;; feed a handle's bytes across, run, read the result back — the
+;; wilderness protocol, one filter at a time
+
+(defmacro film-runners (n &rest body)
+  (if (= (length body) 0)
+      `(splice)
+      (if (sym-is? (first (first body)) "filter")
+          `(splice
+             (film-runner-slot ,n)
+             (film-runners ,(+ n 1) ,@(rest body)))
+          `(film-runners ,n ,@(rest body)))))
+
+(defmacro film-runner-slot (n)
+  (if (= n 0)
+      `(film-runner-body $reel.f0.run $reel.f0.begin $reel.f0.in $reel.f0.go $reel.f0.out)
+      (if (= n 1)
+          `(film-runner-body $reel.f1.run $reel.f1.begin $reel.f1.in $reel.f1.go $reel.f1.out)
+          (if (= n 2)
+              `(film-runner-body $reel.f2.run $reel.f2.begin $reel.f2.in $reel.f2.go $reel.f2.out)
+              `(film-runner-body $reel.f3.run $reel.f3.begin $reel.f3.in $reel.f3.go $reel.f3.out)))))
+
+(defmacro film-runner-body (frun fbegin fin fgo fout)
+  `(func (unhygienic ,frun) (param $h i32) (result i32)
+     ($let (($p (i32.load (local.get $h)))
+            ($n (i32.load (i32.add (local.get $h) (i32.const 4))))
+            ($i (i32.const 0)) ($m (i32.const 0)) ($d (i32.const 0)))
+       (call (unhygienic ,fbegin) (local.get $n))
+       ($while (i32.lt_u (local.get $i) (local.get $n))
+         (call (unhygienic ,fin) (local.get $i) (i32.load8_u (i32.add (local.get $p) (local.get $i))))
+         ($inc! $i 1))
+       (local.set $m (call (unhygienic ,fgo)))
+       (local.set $d (call (unhygienic $reel.alloc) (local.get $m)))
+       (local.set $i (i32.const 0))
+       ($while (i32.lt_u (local.get $i) (local.get $m))
+         (i32.store8 (i32.add (local.get $d) (local.get $i)) (call (unhygienic ,fout) (local.get $i)))
+         ($inc! $i 1))
+       (call (unhygienic $reel.handle) (local.get $d) (local.get $m)))))
+
+;; --------------------------------------------------------- steps
+
+(defmacro film-steps (out ctx &rest body)
+  (if (= (length body) 0)
+      `(splice)
+      (if (sym-is? (first (first body)) "filter")
+          `(film-steps ,out ,ctx ,@(rest body))
+          `(splice
+             (film-step ,out ,ctx ,(first body))
+             (film-steps ,out ,ctx ,@(rest body))))))
+
+(defmacro film-step (out ctx form)
+  (if (sym-is? (first form) "let")
+      `(splice
+         (local ,(second form) i32)
+         (local.set ,(second form) (film-expr ,ctx ,(second (rest form)))))
+      (if (sym-is? (first form) "cut")
+          `(splice
+             (film-inputs ,@(rest form))
+             (call (unhygienic $reel.cut) ,out))
+          `(film-unknown-step ,form))))
+
+(defmacro film-expr (ctx expr)
+  (if (sym-is? (first expr) "perl")
+      `(call (unhygienic $reel.wrap) (call (unhygienic $reel.perl) ,(second expr)))
+      (if (sym-is? (first expr) "speak")
+          `(call (unhygienic $reel.wrap)
+             (call (unhygienic $reel.speak)
+               (i32.load (local.get ,(second expr)))
+               (i32.load (i32.add (local.get ,(second expr)) (i32.const 4)))
+               ,(second (rest expr))))
+          (if (sym-is? (first expr) "gpu")
+              `(call (unhygienic $reel.wrap)
+                 (call (unhygienic $reel.gpu) ,(second expr) (i32.const ,(second (rest expr)))))
+              `(film-call 0 ,ctx ,(first expr) ,(second expr))))))
+
+;; resolve a filter verb to its slot at expansion time — the alist is
+;; the film's own declaration list, walked with a literal index
+(defmacro film-call (n ctx verb arg)
+  (if (= (length ctx) 0)
+      `(film-unknown-verb ,verb)
+      (if (sym-is? (first (first ctx)) "filter")
+          (if (sym-is? verb (second (first ctx)))
+              `(film-slot-call ,n ,arg)
+              `(film-call ,(+ n 1) (,@(rest ctx)) ,verb ,arg))
+          `(film-call ,n (,@(rest ctx)) ,verb ,arg))))
+
+(defmacro film-slot-call (n arg)
+  (if (= n 0)
+      `(call (unhygienic $reel.f0.run) (local.get ,arg))
+      (if (= n 1)
+          `(call (unhygienic $reel.f1.run) (local.get ,arg))
+          (if (= n 2)
+              `(call (unhygienic $reel.f2.run) (local.get ,arg))
+              `(call (unhygienic $reel.f3.run) (local.get ,arg))))))
+
+(defmacro film-inputs (&rest inputs)
+  (if (= (length inputs) 0)
+      `(splice)
+      `(splice
+         (film-input ,(first inputs))
+         (film-inputs ,@(rest inputs)))))
+
+(defmacro film-input (x)
+  (if (list? x)
+      `(call (unhygienic $reel.input)
+         (i32.load (local.get ,(second x)))
+         (i32.load (i32.add (local.get ,(second x)) (i32.const 4)))
+         (i32.const 1))
+      `(call (unhygienic $reel.input)
+         (i32.load (local.get ,x))
+         (i32.load (i32.add (local.get ,x) (i32.const 4)))
+         (i32.const 0))))

@@ -1,0 +1,42 @@
+From 125146be1c41f960b2e3ed33796ebd332ef98807 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 17 Aug 2026 07:10:16 +0000
+Subject: [PATCH 4/6] optim: don't rewire a scalar const through an
+ inapplicable axis change
+
+The change-axes pass diverts volume-1 constants for cloning and
+in-place alteration at patch time, but a true rank-0 scalar can not
+take e.g. an Add(1); change_tensor then fails mid-patch. Register
+the diversion only when the alteration fits the constant's rank;
+otherwise the change propagates to the Const node, whose own
+change_axes declines gracefully and the whole change is abandoned,
+as for any blocked propagation.
+---
+ core/src/optim/change_axes.rs | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/core/src/optim/change_axes.rs b/core/src/optim/change_axes.rs
+index fe727ec..002da8b 100644
+--- a/core/src/optim/change_axes.rs
++++ b/core/src/optim/change_axes.rs
+@@ -149,12 +149,15 @@ pub fn change_axes(
+                 for (wire, op) in wire_changes.into_iter() {
+                     let outlet = wire.as_outlet(node);
+                     // stop upstram propagation to a scalar constant: we will clone it and alter it
+-                    // at patch generation time
++                    // at patch generation time. the alteration must fit the constant's rank —
++                    // a true rank-0 scalar can not take an Add(1) — otherwise let the change
++                    // propagate to the Const node, whose change_axes declines it gracefully.
+                     if let InOut::In(inlet) = wire
+                         && model
+                             .node(outlet.node)
+                             .op_as::<Const>()
+-                            .is_some_and(|k| k.val().volume() == 1)
++                            .is_some_and(|k| k.val().volume() == 1
++                                && op.required_rank() <= k.val().rank())
+                     {
+                         rewired_scalar_input.insert(InletId::new(node.id, inlet), (outlet, op));
+                         continue;
+-- 
+2.43.0
+

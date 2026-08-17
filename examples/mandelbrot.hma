@@ -1,0 +1,74 @@
+;; mandelbrot.hma — the set, rendered by macros, in i32 and nothing else.
+;;
+;; Fixed-point arithmetic with ten fractional bits, because the machine
+;; this Lisp assembles for has no floats it has been taught yet. Run
+;; under WASI it prints a PPM; loaded in a browser it hands the canvas
+;; a framebuffer. Same module, same bytes.
+;;
+;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/mandelbrot.hma > mandelbrot.wat
+;;   wasmtime mandelbrot.wat > mandelbrot.ppm
+
+(use clj.hma)
+
+(module
+  (import "wasi_snapshot_preview1" "fd_write"
+    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 8)
+
+  ;; 10-bit fixed point: 1.0 is 1024, the escape radius squared is 4096
+  (func $fmul (param $a i32) (param $b i32) (result i32)
+    (i32.shr_s (i32.mul (local.get $a) (local.get $b)) (i32.const 10)))
+
+  (func $iters (param $cx i32) (param $cy i32) (result i32)
+    (let [$zx 0 $zy 0 $i 0 $t 0]
+      (while (and (< (local.get $i) 32)
+                  (<= (+ (call $fmul (local.get $zx) (local.get $zx))
+                         (call $fmul (local.get $zy) (local.get $zy)))
+                      4096))
+        (local.set $t (+ (- (call $fmul (local.get $zx) (local.get $zx))
+                            (call $fmul (local.get $zy) (local.get $zy)))
+                         (local.get $cx)))
+        (local.set $zy (+ (* 2 (call $fmul (local.get $zx) (local.get $zy)))
+                          (local.get $cy)))
+        (local.set $zx (local.get $t))
+        (local.set $i (inc (local.get $i))))
+      (local.get $i)))
+
+  (func $shade (param $i i32) (param $p i32)
+    (if (= (local.get $i) 32)
+      (then
+        (i32.store8 (local.get $p) (i32.const 0))
+        (i32.store8 (+ (local.get $p) 1) (i32.const 0))
+        (i32.store8 (+ (local.get $p) 2) (i32.const 0)))
+      (else
+        (i32.store8 (local.get $p) (- 255 (* 7 (local.get $i))))
+        (i32.store8 (+ (local.get $p) 1) (* 8 (local.get $i)))
+        (i32.store8 (+ (local.get $p) 2) (+ 64 (* 5 (local.get $i)))))))
+
+  (func (export "width") (result i32) (i32.const 256))
+  (func (export "height") (result i32) (i32.const 256))
+
+  ;; the view: x in [-2.5, 1), y in [-1.25, 1.25), 256 by 256
+  (func $render (export "render") (result i32)
+    (let [$py 0 $px 0 $p 65536]
+      (while (< (local.get $py) 256)
+        (local.set $px (num 0))
+        (while (< (local.get $px) 256)
+          (call $shade
+            (call $iters (+ -2560 (* 14 (local.get $px)))
+                         (+ -1280 (* 10 (local.get $py))))
+            (local.get $p))
+          (local.set $p (+ (local.get $p) 3))
+          (local.set $px (inc (local.get $px))))
+        (local.set $py (inc (local.get $py))))
+      (i32.const 65536)))
+
+  (func $print (param $ptr i32) (param $len i32)
+    (i32.store (i32.const 0) (local.get $ptr))
+    (i32.store (i32.const 4) (local.get $len))
+    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8))))
+
+  (func (export "_start")
+    (drop (call $render))
+    (call $print "P6\n256 256\n255\n")
+    (call $print (i32.const 65536) (i32.const 196608))))

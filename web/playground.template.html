@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hot Glue Playground</title>
+<style>
+  :root { --bg:#101418; --panel:#171d24; --ink:#d8dee6; --dim:#7b8794; --accent:#5fb3b3; --edge:#232b34; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 15px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; min-height: 100vh; padding: 1.25rem; }
+  header { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  h1 { font-size: 1.2rem; letter-spacing: .12em; }
+  h1 .pearl { color: var(--accent); }
+  header p { color: var(--dim); font-size: .8rem; }
+  .bar { display: flex; gap: .6rem; margin-bottom: 1rem; align-items: center; flex-wrap: wrap; }
+  select, button, input { background: var(--panel); color: var(--ink); border: 1px solid var(--edge); border-radius: 6px; padding: .45rem .8rem; font: inherit; font-size: .85rem; }
+  button { cursor: pointer; border-color: var(--accent); color: var(--accent); }
+  button:hover { background: var(--accent); color: var(--bg); }
+  .status { color: var(--dim); font-size: .8rem; }
+  .panes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .8rem; min-height: 70vh; }
+  @media (max-width: 960px) { .panes { grid-template-columns: 1fr; } }
+  .pane { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
+  .pane h2 { font-size: .7rem; letter-spacing: .15em; color: var(--dim); padding: .5rem .8rem; border-bottom: 1px solid var(--edge); font-weight: normal; text-transform: uppercase; }
+  textarea, pre { flex: 1; background: none; color: inherit; border: 0; padding: .8rem; font: inherit; font-size: .78rem; overflow: auto; white-space: pre; resize: none; outline: none; }
+  #canvas { margin: .8rem; image-rendering: pixelated; max-width: calc(100% - 1.6rem); border-radius: 4px; }
+  #video { margin: .8rem; max-width: calc(100% - 1.6rem); border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>hot glue <span class="pearl">⌾</span> playground</h1>
+  <p>everything runs in this tab — the same hotglue.wasm as the terminal, holding the expander and assembler that built each other as imported modules; (use …) resolves against a lookup path embedded in the page; the C and Rust guests were compiled from the wilderness</p>
+</header>
+<div class="bar">
+  <select id="example"><option>fizzbuzz</option><option>gc-ast</option><option>clojure</option><option>interop</option><option>mandelbrot</option><option>mandelzoom</option><option>deepzoom</option><option>gpt</option></select>
+  <input id="prompt" hidden value="The pearl" spellcheck="false">
+  <button id="run">expand · assemble · run</button>
+  <button id="transcode" hidden>transcode in tab (ffmpeg.wasm, fetches ~31MB)</button>
+  <span class="status" id="status"></span>
+</div>
+<div class="panes">
+  <div class="pane"><h2>hot glue source</h2><textarea id="src" spellcheck="false"></textarea></div>
+  <div class="pane"><h2>expanded wat</h2><pre id="wat"></pre></div>
+  <div class="pane"><h2>output</h2><pre id="out"></pre><canvas id="canvas" hidden></canvas><video id="video" controls loop hidden></video></div>
+</div>
+<script>
+const EXPAND_B64 = "__EXPAND_B64__";
+const AS_B64 = "__AS_B64__";
+const GLUE_B64 = "__GLUE_B64__";
+const C_B64 = "__C_B64__";
+const RUST_B64 = "__RUST_B64__";
+const LIBS = __LIBS__;
+const EXAMPLES = {
+  "fizzbuzz": __FIZZBUZZ__,
+  "gc-ast": __GC_AST__,
+  "clojure": __CLJ__,
+  "interop": __INTEROP__,
+  "mandelbrot": __MANDELBROT__,
+  "mandelzoom": __MANDELZOOM__,
+  "deepzoom": __DEEPZOOM__,
+  "gpt": __GPT__,
+};
+const OYSTER_GZ_B64 = "__OYSTER_GZ_B64__";
+
+const $ = (id) => document.getElementById(id);
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const enc = new TextEncoder(), dec = new TextDecoder();
+
+let expandMod, asMod, glueMod, nativeNs, lastMod, lastY4M, oysterNpt;
+
+// The tab runs the same hotglue.wasm as the terminal: the expander
+// and assembler are instantiated as reactors and handed to the
+// driver as its imported modules; (use …) resolves against LIBS —
+// the embedded lookup path; the textarea is stdin; stdout is the
+// binary. The WAT pane reads straight out of the expander instance
+// the driver drove.
+async function glueCompile(sourceText) {
+  expandMod ??= await WebAssembly.compile(b64(EXPAND_B64));
+  asMod ??= await WebAssembly.compile(b64(AS_B64));
+  glueMod ??= await WebAssembly.compile(b64(GLUE_B64));
+  const stub = { wasi_snapshot_preview1: { fd_read: () => 8, fd_write: () => 8 } };
+  const ex = await WebAssembly.instantiate(expandMod, stub);
+  const asm = await WebAssembly.instantiate(asMod, stub);
+  const stdin = enc.encode(sourceText);
+  const outs = [], errs = [];
+  let stdinPos = 0, nextFd = 100, inst;
+  const vfds = new Map();
+  const dv = () => new DataView(inst.exports.memory.buffer);
+  const u8 = () => new Uint8Array(inst.exports.memory.buffer);
+  const wasi = {
+    args_sizes_get(pc, ps) { dv().setUint32(pc, 1, true); dv().setUint32(ps, 0, true); return 0; },
+    args_get() { return 0; },
+    path_open(dirfd, df, pp, pl, of, rb, ri, ff, res) {
+      const name = dec.decode(u8().slice(pp, pp + pl));
+      if (!(name in LIBS)) return 44;
+      const fd = nextFd++;
+      vfds.set(fd, { bytes: enc.encode(LIBS[name]), pos: 0 });
+      dv().setUint32(res, fd, true);
+      return 0;
+    },
+    fd_read(fd, iovs, cnt, pn) {
+      const base = dv().getUint32(iovs, true), len = dv().getUint32(iovs + 4, true);
+      const f = fd === 0 ? { bytes: stdin, pos: stdinPos } : vfds.get(fd);
+      if (!f) return 8;
+      const n = Math.min(len, f.bytes.length - f.pos);
+      u8().set(f.bytes.subarray(f.pos, f.pos + n), base);
+      f.pos += n;
+      if (fd === 0) stdinPos = f.pos;
+      dv().setUint32(pn, n, true);
+      return 0;
+    },
+    fd_close(fd) { vfds.delete(fd); return 0; },
+    fd_write(fd, iovs, cnt, pn) {
+      const base = dv().getUint32(iovs, true), len = dv().getUint32(iovs + 4, true);
+      (fd === 2 ? errs : outs).push(u8().slice(base, base + len));
+      dv().setUint32(pn, len, true);
+      return 0;
+    },
+  };
+  inst = await WebAssembly.instantiate(glueMod, {
+    wasi_snapshot_preview1: wasi, expand: ex.exports, as: asm.exports });
+  try {
+    inst.exports._start();
+  } catch (e) {
+    throw errs.length ? new Error(dec.decode(concat(errs))) : e;
+  }
+  const wat = new Uint8Array(ex.exports.outlen());
+  for (let i = 0; i < wat.length; i++) wat[i] = ex.exports.out(i);
+  return { wat: dec.decode(wat), bin: concat(outs) };
+}
+
+function concat(parts) {
+  const r = new Uint8Array(parts.reduce((a, b) => a + b.length, 0));
+  let o = 0;
+  for (const b of parts) { r.set(b, o); o += b.length; }
+  return r;
+}
+
+// the oyster's weights, inflated once — a byte-GPT that read this repo's prose
+async function oyster() {
+  if (!OYSTER_GZ_B64) throw new Error("no weights embedded — run scripts/train-oyster.py, then build:web");
+  if (!oysterNpt) {
+    const ds = new DecompressionStream("gzip");
+    oysterNpt = new Uint8Array(
+      await new Response(new Blob([b64(OYSTER_GZ_B64)]).stream().pipeThrough(ds)).arrayBuffer());
+  }
+  return oysterNpt;
+}
+
+// stdin for the gpt example: [weights][u32 plen][prompt][u32 gen][f32 temp][u32 seed]
+async function gptStdin() {
+  const w = await oyster();
+  const p = enc.encode($("prompt").value || "The pearl");
+  const tail = new Uint8Array(4 + p.length + 12);
+  const dv = new DataView(tail.buffer);
+  dv.setUint32(0, p.length, true);
+  tail.set(p, 4);
+  dv.setUint32(4 + p.length, 160, true);
+  dv.setFloat32(8 + p.length, 0.8, true);
+  dv.setUint32(12 + p.length, (Math.random() * 4294967296) >>> 0, true);
+  const blob = new Uint8Array(w.length + tail.length);
+  blob.set(w, 0);
+  blob.set(tail, w.length);
+  return blob;
+}
+
+async function natives() {
+  if (nativeNs) return nativeNs;
+  nativeNs = {};
+  if (C_B64) nativeNs.c = (await WebAssembly.instantiate(await WebAssembly.compile(b64(C_B64)), {})).exports;
+  if (RUST_B64) nativeNs.rust = (await WebAssembly.instantiate(await WebAssembly.compile(b64(RUST_B64)), {})).exports;
+  return nativeNs;
+}
+
+// instantiate with a WASI shim and the native guests; run() drives _start
+async function wasiInstance(mod, stdin) {
+  const outs = [];
+  let pos = 0, inst;
+  const dv = () => new DataView(inst.exports.memory.buffer);
+  const u8 = () => new Uint8Array(inst.exports.memory.buffer);
+  const imports = Object.assign({
+    wasi_snapshot_preview1: {
+      fd_read(fd, iovs, cnt, pn) {
+        const base = dv().getUint32(iovs, true), len = dv().getUint32(iovs + 4, true);
+        const n = Math.min(len, stdin.length - pos);
+        u8().set(stdin.subarray(pos, pos + n), base);
+        pos += n;
+        dv().setUint32(pn, n, true);
+        return 0;
+      },
+      fd_write(fd, iovs, cnt, pn) {
+        const base = dv().getUint32(iovs, true), len = dv().getUint32(iovs + 4, true);
+        outs.push(u8().slice(base, base + len));
+        dv().setUint32(pn, len, true);
+        return 0;
+      },
+    },
+  }, await natives());
+  inst = await WebAssembly.instantiate(mod, imports);
+  return {
+    inst,
+    run() {
+      (inst.exports.run || inst.exports._start)();
+      const r = new Uint8Array(outs.reduce((a, b) => a + b.length, 0));
+      let o = 0;
+      for (const b of outs) { r.set(b, o); o += b.length; }
+      return r;
+    },
+  };
+}
+
+async function run() {
+  const status = $("status");
+  const canvas = $("canvas");
+  canvas.hidden = true;
+  $("video").hidden = true;
+  $("transcode").hidden = true;
+  lastMod = lastY4M = undefined;
+  try {
+    status.textContent = "hotglue.wasm compiles, inside this tab…";
+    const { wat, bin } = await glueCompile($("src").value);
+    $("wat").textContent = wat;
+    const isGpt = $("example").value === "gpt";
+    status.textContent = isGpt ? "the oyster is thinking…" : "running…";
+    const input = isGpt ? await gptStdin() : new Uint8Array(0);
+    const mod = await WebAssembly.compile(bin);
+    const names = WebAssembly.Module.exports(mod).map((e) => e.name);
+    if (names.includes("render") && names.includes("width")) {
+      const { inst } = await wasiInstance(mod, new Uint8Array(0));
+      const ptr = inst.exports.render();
+      const w = inst.exports.width(), h = inst.exports.height();
+      const rgb = new Uint8Array(inst.exports.memory.buffer, ptr, w * h * 3);
+      canvas.width = w;
+      canvas.height = h;
+      canvas.hidden = false;
+      const ctx = canvas.getContext("2d");
+      const img = ctx.createImageData(w, h);
+      for (let i = 0, j = 0; i < w * h; i++) {
+        img.data[i * 4] = rgb[j++];
+        img.data[i * 4 + 1] = rgb[j++];
+        img.data[i * 4 + 2] = rgb[j++];
+        img.data[i * 4 + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      $("out").textContent = "rendered " + w + "×" + h + " into this tab's own canvas";
+      if (names.includes("_start")) {
+        lastMod = mod;
+        $("transcode").hidden = false;
+      }
+    } else if (names.includes("_start")) {
+      const bytes = (await wasiInstance(mod, input)).run();
+      if (bytes.length > 9 && dec.decode(bytes.subarray(0, 9)) === "YUV4MPEG2") {
+        lastY4M = bytes;
+        $("out").textContent = "a YUV4MPEG2 stream, " + bytes.length + " bytes — this module is a video source";
+        $("transcode").hidden = false;
+      } else if (isGpt) {
+        $("out").textContent = $("prompt").value + dec.decode(bytes);
+      } else {
+        $("out").textContent = dec.decode(bytes);
+      }
+    } else {
+      const { inst } = await wasiInstance(mod, new Uint8Array(0));
+      const lines = [];
+      for (const [name, fn] of Object.entries(inst.exports))
+        if (typeof fn === "function") lines.push(name + "() = " + fn());
+      $("out").textContent = lines.join("\n");
+    }
+    status.textContent = bin.length + " bytes of wasm, assembled right here";
+  } catch (e) {
+    status.textContent = "";
+    $("out").textContent = String(e);
+  }
+}
+
+// The whole pipeline stays in the tab: the y4m the Lisp emitted goes
+// through ffmpeg compiled to WebAssembly, fetched on demand.
+$("transcode").onclick = async () => {
+  const status = $("status");
+  try {
+    if (!window.FFmpeg) {
+      status.textContent = "fetching ffmpeg.wasm from unpkg…";
+      await new Promise((ok, err) => {
+        const s = document.createElement("script");
+        s.src = "https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js";
+        s.onload = ok;
+        s.onerror = () => err(new Error("could not fetch ffmpeg.wasm — offline?"));
+        document.head.appendChild(s);
+      });
+    }
+    window.__ff ??= window.FFmpeg.createFFmpeg({
+      log: false,
+      corePath: "https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js",
+    });
+    const ff = window.__ff;
+    if (!ff.isLoaded()) await ff.load();
+    if (!lastY4M) {
+      status.textContent = "rendering the stream in this tab…";
+      lastY4M = (await wasiInstance(lastMod, new Uint8Array(0))).run();
+    }
+    ff.FS("writeFile", "in.y4m", lastY4M);
+    status.textContent = "transcoding in this tab…";
+    await ff.run("-i", "in.y4m", "-frames:v", "90", "-pix_fmt", "yuv420p", "out.mp4");
+    const mp4 = ff.FS("readFile", "out.mp4");
+    const v = $("video");
+    v.src = URL.createObjectURL(new Blob([mp4.buffer], { type: "video/mp4" }));
+    v.hidden = false;
+    v.play();
+    status.textContent = mp4.length + " bytes of mp4 — rendered, assembled, and encoded without leaving this tab";
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+$("example").onchange = () => {
+  $("src").value = EXAMPLES[$("example").value];
+  $("wat").textContent = "";
+  $("out").textContent = "";
+  $("canvas").hidden = true;
+  $("video").hidden = true;
+  $("transcode").hidden = true;
+  $("prompt").hidden = $("example").value !== "gpt";
+};
+$("run").onclick = run;
+$("src").value = EXAMPLES["fizzbuzz"];
+</script>
+</body>
+</html>
