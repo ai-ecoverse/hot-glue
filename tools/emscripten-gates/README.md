@@ -23,22 +23,43 @@ without ever calling JavaScript.
    the module's own table, catch, `setThrew`), which contain no JS
    semantics at all and can be generated as a wasm-side shim.
 
-The verdict on `@ffmpeg/core` 0.11 (closure-minified, the hard
-case): **164 of 260 gates are servable without JavaScript** as
-classified — 96 trampolines, 145 trivial forwards, clocks, stdio —
-and the remainder is threads plumbing, `dlopen` stubs that only
-print an error, and a tail of `other` to read by hand. The ledger
-turns a porting decision from folklore into arithmetic.
+The verdict on `@ffmpeg/core` 0.11 (closure-minified, pthreads,
+the hard case): every one of its 259 function gates resolves to a
+readable body. The ledger turns a porting decision from folklore
+into arithmetic.
 
-Two honest limits, recorded: onnxruntime's esbuild-bundled `.mjs`
-glue uses yet another minification dialect the finder does not parse
-yet (the two-level chase needs one more declaration pattern); and a
-ledger is not a shim — the follow-up tool would emit a Hot Glue
-`env` module implementing the servable classes against WASI, plus
-generated trampolines, and leave the rest as explicit imports for a
-thin host. For binaries that also exist upstream as plain C, the
-wasi-sdk rebuild (see `scripts/build-ffmpeg-wasi.sh`) remains the
-cleaner door — the gate-reader is for the ones that don't.
+And the ledger grew hands. `make-shim.mjs` acts on it: it emits a
+WAT module — in the Hot Glue subset, assembled by `as.hma` like
+everything else here — exporting every gate, translating the ones
+whose bodies translate mechanically (consts, `memcpy_big` as one
+`memory.copy`, the `Date.now` family as WASI `clock_time_get`
+arithmetic, the fd gates as straight WASI forwards — Emscripten's
+iovec walk has WASI's exact layout — and the glue's mutable state
+vars as 4-byte slots in the guest's own memory, below
+`GLOBAL_BASE`). Gates that call back into the module's own exports
+mid-ctors (pthread main-thread init, deferred and atexit table
+calls) are marked for the host; everything else is a loud stub that
+names itself and traps. `thin-host.mjs` is the generic loader: ~40
+lines of WASI, the sidecar's memory descriptor and export map, ctors
+then `main` with argv malloc'd into the module's heap.
+
+The milestone, reached after five turns of the miss-and-translate
+loop: **ffmpeg-core boots and prints its full `-version` banner with
+zero lines of ffmpeg-core.js executed** (`test/gates.test.ts`
+re-proves it). The porting loop is empirical — run, read the miss,
+translate that one gate, run again — not speculative.
+
+Honest limits, recorded: onnxruntime's esbuild-bundled `.mjs` glue
+uses a minification dialect the finder does not parse yet; the fd
+gates forward to WASI but no filesystem beyond stdio is served, so
+commands that open files need more gates translated; and threads
+never spawn — fine for `-version`, a real port would confront
+`pthread_create`. For binaries that also exist upstream as plain C,
+the wasi-sdk rebuild (see `scripts/build-ffmpeg-wasi.sh`) remains
+the cleaner door — the gate tools are for the ones that don't.
 
     node tools/emscripten-gates/read-gates.mjs core.wasm core.js
     VERBOSE=1 …  # full ledger, every gate
+    node tools/emscripten-gates/make-shim.mjs core.wasm core.js out/
+    wasmtime run --invoke run dist/hotglue/as.wat < out/shim.wat > out/shim.wasm
+    node tools/emscripten-gates/thin-host.mjs core.wasm out/ -- -version
