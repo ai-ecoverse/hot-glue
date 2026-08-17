@@ -121,6 +121,11 @@ behind it. Hot Glue's civility compiles away before the border is reached.
   company by one escape iteration.
 - **`examples/perl-driver.hma`** — a supervisor with no memory of its own,
   importing zeroperl's and re-exporting it, so Perl 5 runs under plain wasmtime.
+- **`tools/emscripten-gates/`** — the doctrine for giants that ship only as
+  Emscripten builds: read the JS glue as text, classify every minified gate by
+  what its body does, then serve the same gates from a host with no JavaScript
+  in it. Executed rather than theorised — ffmpeg-core boots and prints its full
+  `-version` banner with none of its own JavaScript ever running.
 
 The full argument, stage by stage, is **[`docs/wasm-macros.md`](docs/wasm-macros.md)** — the
 design document that came first and was kept honest afterwards.
@@ -150,9 +155,10 @@ demands; they are upstream-shaped and apply with `git am`.
   running it. Without wasmtime the suite still collects, but the interesting
   tests skip.
 - Optional: **clang** and **rustc** with wasm targets (`npm run build:native`),
-  **Python 3** with PyTorch (`npm run train:oyster`), a full Chromium for the
-  playground and WebGPU tests (Playwright's stripped headless has no
-  `navigator.gpu` — ask for the full build).
+  **Python 3** with PyTorch (`npm run train:oyster`), **wasm-tools** for the
+  component work (`scripts/make-envelope.mjs`, `test/envelope.test.ts`), a full
+  Chromium for the playground and WebGPU tests (Playwright's stripped headless
+  has no `navigator.gpu` — ask for the full build).
 
 ## Where this came from
 
