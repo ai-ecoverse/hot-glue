@@ -156,6 +156,33 @@ describe('the film is a program; the projector is a lamp', () => {
     expect(out).toMatch(/\d+ thousand/); // Perl did arithmetic, as Perl does
   }, 120000);
 
+  it.skipIf(!runtime || !existsSync('examples/native/ffmpeg.wasm'))(
+    'the cut runs under pure wasmtime: ffmpeg + x264, compiled to wasi',
+    () => {
+      // two frames from the Lisp, a beep from the Lisp, one mp4 from wasmtime
+      const y4mWat = join(dir, 'y4m.wat');
+      writeFileSync(y4mWat, compile(loadSource(['examples/rgb2y4m.hma'])));
+      const rgb = Buffer.alloc(2 * 196608);
+      for (let i = 0; i < rgb.length; i++) rgb[i] = (i * 7) & 255;
+      writeFileSync(join(dir, 'in.y4m'), execFileSync(runtime!, [y4mWat], { input: rgb, maxBuffer: 1 << 24 }));
+      const wavWat = join(dir, 'wav.wat');
+      writeFileSync(wavWat, compile(loadSource(['examples/wav.hma'])));
+      const pcm = Buffer.alloc(2400 * 4);
+      for (let i = 0; i < 2400; i++) pcm.writeFloatLE(Math.sin(i / 10) * 0.5, i * 4);
+      writeFileSync(join(dir, 'in.wav'), execFileSync(runtime!, [wavWat], { input: pcm, maxBuffer: 1 << 24 }));
+      execFileSync(runtime!, [
+        '--dir', `${dir}::/work`, 'examples/native/ffmpeg.wasm', '-nostdin', '-hide_banner', '-loglevel', 'error',
+        '-i', '/work/in.y4m', '-i', '/work/in.wav',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-shortest', '-pix_fmt', 'yuv420p',
+        '/work/out.mp4',
+      ]);
+      const mp4 = readFileSync(join(dir, 'out.mp4'));
+      expect(mp4.subarray(4, 8).toString()).toBe('ftyp');
+      expect(mp4.length).toBeGreaterThan(2000);
+    },
+    300000,
+  );
+
   it.skipIf(!chromium || !runtime)(
     'webgpu renders a frame the Lisp can glue',
     () => {

@@ -119,15 +119,25 @@ const host = {
   input(p, n, loop) {
     inputs.push({ bytes: Buffer.from(mem().slice(p, p + n)), loop: !!loop });
   },
+  // the cut runs under wasmtime: ffmpeg n5.1 + x264 compiled against
+  // wasi-sdk (examples/native/ffmpeg.wasm, scripts/build-ffmpeg-wasi.sh)
   cut(pp, pl) {
     const out = str(pp, pl);
-    const specs = inputs.map((inp, i) => {
-      const file = join(dir, inp.bytes.subarray(0, 4).toString() === 'RIFF' ? `${i}.wav` : `${i}.y4m`);
-      writeFileSync(file, inp.bytes);
-      return inp.loop ? `${file}:loop` : file;
+    const args = [];
+    let hasAudio = false;
+    inputs.forEach((inp, i) => {
+      const file = inp.bytes.subarray(0, 4).toString() === 'RIFF' ? `${i}.wav` : `${i}.y4m`;
+      if (file.endsWith('.wav')) hasAudio = true;
+      writeFileSync(join(dir, file), inp.bytes);
+      if (inp.loop) args.push('-stream_loop', '-1');
+      args.push('-i', `/work/${file}`);
     });
-    run('node', ['scripts/ffmpeg-cut.mjs', out, ...specs]);
-    console.log(`  ffmpeg.wasm cut ${out}`);
+    args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-shortest', '-pix_fmt', 'yuv420p');
+    if (hasAudio) args.push('-c:a', 'aac');
+    run(wasmtime, ['--dir', `${dir}::/work`, 'examples/native/ffmpeg.wasm', '-nostdin', '-hide_banner',
+                   '-loglevel', 'error', ...args, '/work/out.mp4']);
+    writeFileSync(out, readFileSync(join(dir, 'out.mp4')));
+    console.log(`  ffmpeg, compiled to wasi, cut ${out} under wasmtime`);
   },
 };
 
