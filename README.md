@@ -166,6 +166,21 @@ the rename and the flattening into this repository.
 Nacre survives where it always belonged: in the oyster, in the pearl, and in
 perlmutt's mother tongue.
 
+The exploration is still running up there, so the carve is a script rather than
+an afternoon. `tools/upstream-sync/` holds the whole transform — the path
+include-set, the content-rewrite rules, and the upstream sha tracked so far:
+
+```sh
+tools/upstream-sync/sync.sh --check     # has upstream moved? (exit 3 = yes)
+tools/upstream-sync/sync.sh --verify    # rebuild this tree from upstream, diff
+tools/upstream-sync/sync.sh             # port what's new onto a branch
+```
+
+`--verify` is the load-bearing one: it re-derives every carried file from
+upstream and compares byte for byte. That the transform is *reproducible*, not
+merely done, is what lets new upstream commits apply as ordinary patches — they
+arrive already spelling `src/` where upstream said `src/hotglue/`.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
