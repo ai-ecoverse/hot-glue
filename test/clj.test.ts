@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
+import { compile, loadSource } from '../src/bootstrap.js';
 
 function wasmtime(): string | null {
   for (const bin of ['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')]) {
@@ -51,7 +51,7 @@ describe.skipIf(!runtime)('clj.hma — the Clojure accent', () => {
 
   it('the assembled binary agrees', () => {
     const asWat = join(dir, 'as.wat');
-    writeFileSync(asWat, compile(src('src/hotglue/as.hma')));
+    writeFileSync(asWat, compile(src('src/as.hma')));
     const bin = execFileSync(runtime!, ['run', '--invoke', 'run', asWat], { input: readFileSync(watFile), maxBuffer: 1 << 26 });
     const wasm = join(dir, 'collatz.wasm');
     writeFileSync(wasm, bin);

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
+import { compile, loadSource } from '../src/bootstrap.js';
 
 function probe(bins: string[], flag: string): string | null {
   for (const bin of bins) {
@@ -28,7 +28,7 @@ const hotglueWasm = join(dir, 'hotglue.wasm');
 // against a .hma, a .wasm back
 function driver(entry: string, input?: Buffer): Buffer {
   const args = [
-    '--dir', 'src/hotglue', '--dir', 'examples',
+    '--dir', 'src', '--dir', 'examples',
     '--preload', `expand=${expandWasm}`, '--preload', `as=${asWasm}`,
     hotglueWasm,
   ];
@@ -44,7 +44,7 @@ function bootstrap(entry: string): Buffer {
 
 beforeAll(() => {
   if (!runtime) return;
-  writeFileSync(asWat, compile(loadSource(['src/hotglue/as.hma'])));
+  writeFileSync(asWat, compile(loadSource(['src/as.hma'])));
   const assemble = (entry: string, out: string) =>
     writeFileSync(
       out,
@@ -53,9 +53,9 @@ beforeAll(() => {
         maxBuffer: 1 << 26,
       }),
     );
-  assemble('src/hotglue/as.hma', asWasm);
-  assemble('src/hotglue/expand.hma', expandWasm);
-  assemble('src/hotglue/hotglue.hma', hotglueWasm);
+  assemble('src/as.hma', asWasm);
+  assemble('src/expand.hma', expandWasm);
+  assemble('src/hotglue.hma', hotglueWasm);
 });
 
 describe.skipIf(!runtime)('hotglue.wasm — the compiler is a wasm binary', () => {

@@ -3,8 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
-import { lower } from '../../src/hotglue/binaryen-lower.js';
+import { compile, loadSource } from '../src/bootstrap.js';
+import { lower } from '../src/binaryen-lower.js';
 
 function wasmtime(): string | null {
   for (const bin of ['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')]) {
@@ -33,7 +33,7 @@ describe.skipIf(!runtime)('binaryen — the alternate lowering', () => {
   });
 
   it('the optimized assembler still assembles byte-identically', () => {
-    const asWat = compile(src('src/hotglue/as.hma'));
+    const asWat = compile(src('src/as.hma'));
     const asWatFile = join(dir, 'as.wat');
     const asOptFile = join(dir, 'as.opt.wasm');
     writeFileSync(asWatFile, asWat);

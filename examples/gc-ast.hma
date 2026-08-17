@@ -5,7 +5,7 @@
 ;; matching by br_on_cast. The macros build GC literals at expansion
 ;; time — ($qlist 1 2 3 4 5) becomes a chain of struct.new forms.
 ;;
-;;   npx tsx src/hotglue/cli.ts examples/gc-ast.hma > gc.wat
+;;   npx tsx src/cli.ts examples/gc-ast.hma > gc.wat
 ;;   wasmtime run -W gc,function-references --invoke demo gc.wat   ;; 15
 
 (module

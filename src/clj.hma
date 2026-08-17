@@ -1,6 +1,6 @@
 ;; clj.hma — a Clojure accent for the WebAssembly macro assembler.
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma your.hma
+;;   npx tsx src/cli.ts src/clj.hma your.hma
 ;;
 ;; Brackets read as parentheses, so bindings look like home. Bare
 ;; numbers in these macros wrap themselves in i32.const. Locals are

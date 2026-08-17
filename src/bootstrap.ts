@@ -87,7 +87,7 @@ export function resolveUses(
 export function loadSource(paths: string[], extraDirs: string[] = []): string {
   const seen = new Set<string>();
   const home = dirname(new URL(import.meta.url).pathname);
-  const dirs = [...paths.map((p) => dirname(p)), ...extraDirs, 'src/hotglue', home];
+  const dirs = [...paths.map((p) => dirname(p)), ...extraDirs, 'src', home];
   const readNamed = (name: string): string => {
     for (const d of dirs) {
       const p = join(d, name);

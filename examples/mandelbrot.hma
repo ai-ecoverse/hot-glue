@@ -5,7 +5,7 @@
 ;; under WASI it prints a PPM; loaded in a browser it hands the canvas
 ;; a framebuffer. Same module, same bytes.
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/mandelbrot.hma > mandelbrot.wat
+;;   npx tsx src/cli.ts src/clj.hma examples/mandelbrot.hma > mandelbrot.wat
 ;;   wasmtime mandelbrot.wat > mandelbrot.ppm
 
 (use clj.hma)

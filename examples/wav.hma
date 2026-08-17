@@ -7,7 +7,7 @@
 ;; neural net running in a wasm sandbox, the film is cut by ffmpeg
 ;; compiled to wasm, and the Lisp holds the header between them.
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/wav.hma > wav.wat
+;;   npx tsx src/cli.ts src/clj.hma examples/wav.hma > wav.wat
 ;;   wasmtime wav.wat < voice.f32 > voice.wav
 
 (use clj.hma)

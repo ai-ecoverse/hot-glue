@@ -5,7 +5,7 @@
 ;; ten fixed-point bits could never survive. Same Y4M pipeline as
 ;; mandelzoom, so ffmpeg needs no flags:
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/deepzoom.hma > deepzoom.wat
+;;   npx tsx src/cli.ts src/clj.hma examples/deepzoom.hma > deepzoom.wat
 ;;   wasmtime deepzoom.wat | ffmpeg -i - deepzoom.mp4
 ;;
 ;; Floats put this module in explicit-type territory: signatures that

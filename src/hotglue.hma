@@ -3,7 +3,7 @@
 ;; Put the dependencies in the lookup path, run hotglue.wasm against
 ;; a .hma file, get a .wasm back:
 ;;
-;;   wasmtime --dir src/hotglue --dir examples \
+;;   wasmtime --dir src --dir examples \
 ;;     --preload expand=expand.wasm --preload as=as.wasm \
 ;;     hotglue.wasm gpt.hma > gpt.wasm
 ;;

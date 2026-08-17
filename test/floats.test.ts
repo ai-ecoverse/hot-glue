@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
+import { compile, loadSource } from '../src/bootstrap.js';
 
 function probe(bins: string[], flag: string): string | null {
   for (const bin of bins) {
@@ -38,7 +38,7 @@ const invoke = (wasm: string, name: string) =>
   );
 
 beforeAll(() => {
-  writeFileSync(asWat, compile(src('src/hotglue/as.hma')));
+  writeFileSync(asWat, compile(src('src/as.hma')));
 });
 
 describe.skipIf(!runtime)('floating point — the missing vowels', () => {
@@ -58,10 +58,10 @@ describe.skipIf(!runtime)('floating point — the missing vowels', () => {
     const source = src('examples/deepzoom.hma');
     const want = compile(source);
     const expandWat = join(dir, 'expand.wat');
-    writeFileSync(expandWat, compile(src('src/hotglue/expand.hma')));
+    writeFileSync(expandWat, compile(src('src/expand.hma')));
     expect(execFileSync(runtime!, ['run', '--invoke', 'run', expandWat], { input: source, maxBuffer: 1 << 26 }).toString()).toBe(want);
     const gcWat = join(dir, 'expand-gc.wat');
-    writeFileSync(gcWat, compile(src('src/hotglue/expand-gc.hma')));
+    writeFileSync(gcWat, compile(src('src/expand-gc.hma')));
     expect(
       execFileSync(runtime!, ['run', ...GC, '--invoke', 'run', gcWat], { input: source, maxBuffer: 1 << 26 }).toString(),
     ).toBe(want);

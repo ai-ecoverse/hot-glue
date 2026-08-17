@@ -5,7 +5,7 @@
 ;; go/out byte protocol lets hotglue.wasm drive it as an imported
 ;; module:
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/as.hma > as.wat
+;;   npx tsx src/cli.ts src/as.hma > as.wat
 ;;   wasmtime run --invoke run as.wat < program.wat > program.wasm
 ;;
 ;; Self-hosting: as.wat assembles its own text, and the binary it

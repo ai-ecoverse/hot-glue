@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.tsbuildinfo
+models/
+*.mp4
+
+# Built, not authored — `npm run build:web` regenerates it from
+# web/playground.template.html.
+web/playground.html
+
+# Large artifacts with recipes rather than commits. See the README's
+# "Things you build yourself" section.
+examples/native/ffmpeg.wasm
+examples/native/espeak.wasm
+examples/oyster.npt

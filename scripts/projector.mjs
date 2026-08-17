@@ -43,7 +43,7 @@ const filmMod = new WebAssembly.Module(readFileSync(filmPath));
 function compileHma(ns) {
   return execFileSync(
     wasmtime,
-    ['--dir', 'src/hotglue', '--dir', 'examples', '--dir', '.',
+    ['--dir', 'src', '--dir', 'examples', '--dir', '.',
      '--preload', `expand=${dist}/expand.wasm`, '--preload', `as=${dist}/as.wasm`,
      `${dist}/hotglue.wasm`, ns],
     { maxBuffer: 1 << 26 },

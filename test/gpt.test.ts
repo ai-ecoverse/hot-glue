@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
+import { compile, loadSource } from '../src/bootstrap.js';
 
 function probe(bins: string[], flag: string): string | null {
   for (const bin of bins) {
@@ -41,7 +41,7 @@ beforeAll(() => {
   if (!runtime) return;
   const asWat = join(dir, 'as.wat');
   const gptWat = join(dir, 'gpt.wat');
-  writeFileSync(asWat, compile(src('src/hotglue/as.hma')));
+  writeFileSync(asWat, compile(src('src/as.hma')));
   writeFileSync(gptWat, compile(src('examples/gpt.hma')));
   gptWasm = join(dir, 'gpt.wasm');
   writeFileSync(gptWasm, execFileSync(runtime, ['run', '--invoke', 'run', asWat], { input: readFileSync(gptWat), maxBuffer: 1 << 24 }));

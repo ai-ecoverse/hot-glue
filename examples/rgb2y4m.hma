@@ -5,7 +5,7 @@
 ;; renderers use, so a GPU that only knows RGBA can still hand its
 ;; frames to ffmpeg. Frame count is whatever stdin holds.
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/rgb2y4m.hma > rgb2y4m.wat
+;;   npx tsx src/cli.ts src/clj.hma examples/rgb2y4m.hma > rgb2y4m.wat
 ;;   wasmtime rgb2y4m.wat < frames.rgb > frames.y4m
 
 (use clj.hma)

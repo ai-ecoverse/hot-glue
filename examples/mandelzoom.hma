@@ -4,7 +4,7 @@
 ;; fourteen fractional bits deep, emitted as YUV4MPEG2 — the format
 ;; ffmpeg drinks straight, no flags, self-describing. Pipe and go:
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/mandelzoom.hma > mandelzoom.wat
+;;   npx tsx src/cli.ts src/clj.hma examples/mandelzoom.hma > mandelzoom.wat
 ;;   wasmtime mandelzoom.wat | ffmpeg -i - mandelzoom.mp4
 ;;   wasmtime mandelzoom.wat | ffmpeg -i - -f lavfi -i testsrc2=size=256x256:rate=30 \
 ;;     -filter_complex hstack -t 5 duet.mp4

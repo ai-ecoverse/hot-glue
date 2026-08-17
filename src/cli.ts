@@ -20,7 +20,7 @@ try {
   const files = viaBinaryen ? args.slice(1) : args;
   const src = files.length
     ? loadSource(files)
-    : resolveUses(readFileSync(0, 'utf8'), (name) => readFileSync(`src/hotglue/${name}`, 'utf8'));
+    : resolveUses(readFileSync(0, 'utf8'), (name) => readFileSync(`src/${name}`, 'utf8'));
   const wat = compile(src);
   if (viaBinaryen) {
     const { lower } = await import('./binaryen-lower.js');

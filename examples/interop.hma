@@ -6,7 +6,7 @@
 ;; module byte by byte across the boundary and threads the result
 ;; through the Rust one. Three languages, three modules, one stack.
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/clj.hma examples/interop.hma > interop.wat
+;;   npx tsx src/cli.ts src/clj.hma examples/interop.hma > interop.wat
 ;;   wasmtime run --preload c=examples/native/crc32.wasm \
 ;;                --preload rust=examples/native/fmix.wasm interop.wat
 

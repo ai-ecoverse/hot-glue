@@ -5,7 +5,7 @@
 ;; samples into streams, and ffmpeg (in wasm) cuts the print. This
 ;; file compiles like any other Hot Glue program:
 ;;
-;;   wasmtime --dir src/hotglue --dir examples \
+;;   wasmtime --dir src --dir examples \
 ;;     --preload expand=expand.wasm --preload as=as.wasm \
 ;;     hotglue.wasm film.hma > film.wasm
 ;;   node scripts/projector.mjs film.wasm

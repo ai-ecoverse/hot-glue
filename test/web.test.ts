@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
 import { chromium, type Browser } from 'playwright-core';
-import { buildPage } from '../../src/hotglue/build-web.js';
+import { buildPage } from '../src/build-web.js';
 
 async function launch(): Promise<Browser | null> {
   const tries = [

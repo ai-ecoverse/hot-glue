@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
+import { compile, loadSource } from '../src/bootstrap.js';
 
 function wasmtime(): string | null {
   for (const bin of ['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')]) {
@@ -27,8 +27,8 @@ const pipe = (module: string, input: string | Buffer): Buffer =>
   execFileSync(runtime!, ['run', '--invoke', 'run', module], { input, maxBuffer: 1 << 26 });
 
 beforeAll(() => {
-  writeFileSync(expandWat, compile(src('src/hotglue/expand.hma')));
-  writeFileSync(asWat, compile(src('src/hotglue/as.hma')));
+  writeFileSync(expandWat, compile(src('src/expand.hma')));
+  writeFileSync(asWat, compile(src('src/as.hma')));
 });
 
 describe.skipIf(!runtime)('expand.hma — the expander', () => {
@@ -38,7 +38,7 @@ describe.skipIf(!runtime)('expand.hma — the expander', () => {
   });
 
   it('matches stage 0 on the assembler, byte for byte', () => {
-    const source = src('src/hotglue/as.hma');
+    const source = src('src/as.hma');
     expect(pipe(expandWat, source).toString()).toBe(compile(source));
   });
 
@@ -48,7 +48,7 @@ describe.skipIf(!runtime)('expand.hma — the expander', () => {
   });
 
   it('expands its own source to the text it is running as', () => {
-    const source = src('src/hotglue/expand.hma');
+    const source = src('src/expand.hma');
     expect(pipe(expandWat, source).toString()).toBe(readFileSync(expandWat, 'utf8'));
   });
 
@@ -66,10 +66,10 @@ describe.skipIf(!runtime)('expand.hma — the expander', () => {
     expect(execFileSync(runtime!, [fbWasm], { maxBuffer: 1 << 26 }).toString()).toContain('FizzBuzz');
 
     // The ouroboros, both heads: each tool rebuilds itself through the other.
-    const expandWat2 = pipe(expandWasm, src('src/hotglue/expand.hma'));
+    const expandWat2 = pipe(expandWasm, src('src/expand.hma'));
     const expandWasm2 = pipe(asWasm, expandWat2);
     expect(expandWasm2.equals(readFileSync(expandWasm))).toBe(true);
-    const asWat2 = pipe(expandWasm, src('src/hotglue/as.hma'));
+    const asWat2 = pipe(expandWasm, src('src/as.hma'));
     const asWasm2 = pipe(asWasm, asWat2);
     expect(asWasm2.equals(readFileSync(asWasm))).toBe(true);
   });

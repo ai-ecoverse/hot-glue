@@ -27,9 +27,9 @@ export function buildPage(root = '.'): string {
     }
   };
   let page = readFileSync(p('web', 'playground.template.html'), 'utf8');
-  page = fill(page, '__EXPAND_B64__', b64(lower(compile(read('src/hotglue/expand.hma')))));
-  page = fill(page, '__AS_B64__', b64(lower(compile(read('src/hotglue/as.hma')))));
-  page = fill(page, '__GLUE_B64__', b64(lower(compile(read('src/hotglue/hotglue.hma')))));
+  page = fill(page, '__EXPAND_B64__', b64(lower(compile(read('src/expand.hma')))));
+  page = fill(page, '__AS_B64__', b64(lower(compile(read('src/as.hma')))));
+  page = fill(page, '__GLUE_B64__', b64(lower(compile(read('src/hotglue.hma')))));
   page = fill(page, '__C_B64__', wasm('examples/native/crc32.wasm'));
   page = fill(page, '__RUST_B64__', wasm('examples/native/fmix.wasm'));
   // the lookup path, embedded: (use …) in the tab resolves against these
@@ -38,8 +38,8 @@ export function buildPage(root = '.'): string {
     page,
     '__LIBS__',
     JSON.stringify({
-      'prelude.hma': raw('src/hotglue/prelude.hma'),
-      'clj.hma': raw('src/hotglue/clj.hma'),
+      'prelude.hma': raw('src/prelude.hma'),
+      'clj.hma': raw('src/clj.hma'),
     }),
   );
   // examples arrive verbatim — their (use …) lines resolve in the tab

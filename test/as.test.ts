@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compile, loadSource } from '../../src/hotglue/bootstrap.js';
+import { compile, loadSource } from '../src/bootstrap.js';
 
 function wasmtime(): string | null {
   for (const bin of ['wasmtime', join(process.env.HOME ?? '', '.local/bin/wasmtime')]) {
@@ -32,7 +32,7 @@ const run = (wasm: Buffer, args: string[] = []): Buffer => {
 };
 
 beforeAll(() => {
-  writeFileSync(asWat, compile(loadSource(['src/hotglue/as.hma'])));
+  writeFileSync(asWat, compile(loadSource(['src/as.hma'])));
 });
 
 describe.skipIf(!runtime)('as.hma — the assembler', () => {

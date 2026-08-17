@@ -11,8 +11,8 @@
 ;;
 ;; It stays inside the subset as.hma assembles, so the loop holds:
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/prelude.hma src/hotglue/expand-gc.hma > expand-gc.wat
-;;   cat src/hotglue/prelude.hma src/hotglue/expand-gc.hma | wasmtime -W gc,function-references expand-gc.wat > again.wat
+;;   npx tsx src/cli.ts src/prelude.hma src/expand-gc.hma > expand-gc.wat
+;;   cat src/prelude.hma src/expand-gc.hma | wasmtime -W gc,function-references expand-gc.wat > again.wat
 ;;   diff expand-gc.wat again.wat   ;; nothing
 ;;
 ;; Memory: 0 iovec, 8 io-count, 12 heap pointer, 20 cursor, 24 input

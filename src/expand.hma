@@ -8,7 +8,7 @@
 ;; subset as.hma assembles, so the toolchain can build itself without
 ;; a text parser in sight:
 ;;
-;;   npx tsx src/hotglue/cli.ts src/hotglue/expand.hma > expand.wat
+;;   npx tsx src/cli.ts src/expand.hma > expand.wat
 ;;   # feed it its own resolved source; it prints the text it runs as
 ;;   wasmtime run --invoke run expand.wat < resolved-expand.hma > expand2.wat
 ;;   diff expand.wat expand2.wat   ;; nothing
