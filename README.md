@@ -114,7 +114,11 @@ behind it. Hot Glue's civility compiles away before the border is reached.
   lamp that has never read a film; it learns what to load by asking
   `WebAssembly.Module.imports`. Six languages appear in the credits — Lisp,
   Perl, WGSL, C, Rust, JavaScript — and the only one that ever leaves a sandbox
-  is the glue, which owns no hot path to leave with.
+  is the glue, which owns no hot path to leave with. The picture no longer
+  needs a browser either: `GPU_WASI=1` dispatches `examples/mandel.wgsl` as a
+  `wasi:webgpu` component instead of a Chromium tab, and the two renderers
+  disagree on 0.04% of bytes — boundary pixels where two software Vulkans part
+  company by one escape iteration.
 - **`examples/perl-driver.hma`** — a supervisor with no memory of its own,
   importing zeroperl's and re-exporting it, so Perl 5 runs under plain wasmtime.
 
@@ -133,6 +137,7 @@ required to work on the language.
 | `examples/native/espeak.wasm` | `npm run build:espeak` (wasi-sdk; espeak-ng 1.51) | `SPEAK_WASI=1`, the pure-wasm voice |
 | `examples/oyster.npt` | `npm run train:oyster` (CPU PyTorch, ~820k params) | `test/gpt.test.ts`, the playground's prompt box |
 | `web/playground.html` | `npm run build:web` | the browser as expansion host |
+| `tools/mandel-webgpu/wasi-gfx-runtime/` | `npm run build:webgpu` (clones and patches wasi-gfx-runtime; needs cargo and wasm-tools) | `GPU_WASI=1`, the browserless GPU path in `test/projector.test.ts` |
 
 Kokoro's weights arrive with `npm run fetch:kokoro`. The six patches under
 `patches/tract/` teach the pure-Rust ONNX runtime what Kokoro's fp32 export

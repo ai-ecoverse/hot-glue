@@ -18,3 +18,6 @@ examples/oyster.npt
 
 # git-filter-repo, fetched on demand by tools/upstream-sync/sync.sh
 tools/upstream-sync/.cache/
+
+# Cloned and built by scripts/build-mandel-webgpu.sh
+tools/mandel-webgpu/wasi-gfx-runtime/

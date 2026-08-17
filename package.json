@@ -30,6 +30,7 @@
     "build:web": "npx tsx src/build-web.ts",
     "build:ffmpeg": "bash scripts/build-ffmpeg-wasi.sh",
     "build:espeak": "bash scripts/build-espeak-wasi.sh",
+    "build:webgpu": "bash scripts/build-mandel-webgpu.sh",
     "bootstrap": "mkdir -p dist/hotglue && npx tsx src/cli.ts src/as.hma > dist/hotglue/as.wat && npx tsx src/cli.ts src/expand.hma > dist/hotglue/expand.wat && npx tsx src/cli.ts src/hotglue.hma > dist/hotglue/hotglue.wat && wasmtime run --invoke run dist/hotglue/as.wat < dist/hotglue/as.wat > dist/hotglue/as.wasm && wasmtime run --invoke run dist/hotglue/as.wat < dist/hotglue/expand.wat > dist/hotglue/expand.wasm && wasmtime run --invoke run dist/hotglue/as.wat < dist/hotglue/hotglue.wat > dist/hotglue/hotglue.wasm && echo 'bootstrap done — now: npm run -s compile -- program.hma > program.wasm'",
     "compile": "wasmtime --dir src --dir examples --dir . --preload expand=dist/hotglue/expand.wasm --preload as=dist/hotglue/as.wasm dist/hotglue/hotglue.wasm",
     "fetch:kokoro": "mkdir -p models/kokoro/onnx models/kokoro/voices && B=https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main && curl -LsSf -o models/kokoro/config.json $B/config.json && curl -LsSf -o models/kokoro/tokenizer.json $B/tokenizer.json && curl -LsSf -o models/kokoro/tokenizer_config.json $B/tokenizer_config.json && curl -LsSf -o models/kokoro/onnx/model_quantized.onnx $B/onnx/model_quantized.onnx && curl -LsSf -o models/kokoro/voices/af_heart.bin $B/voices/af_heart.bin",
