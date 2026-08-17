@@ -315,8 +315,7 @@ The resident model is **the oyster** (`scripts/train-oyster.py`): some 820k para
 
 ## 12. One name, one flow
 
-The language was born nacre and grew a glue layer called hot glue, and for one commit the two pretended to be different things. They are not. The decree, from upstream and adopted in full: **Hot Glue** is the language, `.hma` is the extension, and there is no seam between the macro assembler and the film that uses it – `src/nacre` became `src/hotglue` (and plain `src` again when the work moved
-into a repository that already carries the name), every `.nacre` became `.hma`, the film interpreter surrendered the language's name and became `scripts/projector.ts`, and nacre survives only where it always belonged: in the oyster, in the pearl, and in perlmutt's mother tongue.
+The language was born nacre and grew a glue layer called hot glue, and for one commit the two pretended to be different things. They are not. The decree, from upstream and adopted in full: **Hot Glue** is the language, `.hma` is the extension, and there is no seam between the macro assembler and the film that uses it – `src/nacre` became `src/hotglue` (and plain `src` again once the work moved into a repository that already carries the name), every `.nacre` became `.hma`, the film interpreter surrendered the language's name and became `scripts/projector.ts`, and nacre survives only where it always belonged: in the oyster, in the pearl, and in perlmutt's mother tongue.
 
 With the one name came the one law: after the bootstrap, no program in this repository is TypeScript. Its enforcement has three parts.
 

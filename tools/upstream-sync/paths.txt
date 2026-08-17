@@ -1,0 +1,15 @@
+docs/wasm-macros.md
+glob:examples/*.hma
+glob:examples/*.nacre
+examples/mandel.wgsl
+examples/narration.pl
+examples/oyster.test.json
+examples/native/
+patches/
+scripts/
+src/nacre/
+src/hotglue/
+test/nacre/
+test/hotglue/
+tools/
+web/playground.template.html

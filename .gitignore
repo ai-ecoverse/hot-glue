@@ -15,3 +15,6 @@ web/playground.html
 examples/native/ffmpeg.wasm
 examples/native/espeak.wasm
 examples/oyster.npt
+
+# git-filter-repo, fetched on demand by tools/upstream-sync/sync.sh
+tools/upstream-sync/.cache/

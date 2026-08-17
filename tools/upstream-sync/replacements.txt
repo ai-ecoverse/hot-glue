@@ -1,0 +1,4 @@
+literal:../../src/hotglue/==>../src/
+literal:src/hotglue==>src
+literal:test/hotglue==>test
+literal:`src/nacre` became `src`, every==>`src/nacre` became `src/hotglue` (and plain `src` again once the work moved into a repository that already carries the name), every
