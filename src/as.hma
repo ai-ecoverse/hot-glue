@@ -706,6 +706,25 @@
         (local.set $p ($cdr (local.get $p))))
       (i32.add (i32.mul (local.get $np) (i32.const 256)) (local.get $nr))))
 
+  ;; An implicitly typed function — no (type $t) reference — takes its
+  ;; signature from $sig-key, which carries arity and nothing else, so
+  ;; $functype! writes every param and result as i32. A non-i32 valtype
+  ;; therefore assembled to a signature the source never asked for, with
+  ;; no diagnostic: the module validated and lied. Floats and GC already
+  ;; live in explicit-(type ...) territory by design; say so out loud.
+  (func $check-i32-sig (param $f i32)
+    ($let (($p ($cdr (local.get $f))) ($c (i32.const 0)) ($q (i32.const 0)))
+      ($while (i32.eqz ($nil? (local.get $p)))
+        (local.set $c ($car (local.get $p)))
+        ($when ($or (call $his (local.get $c) "param") (call $his (local.get $c) "result"))
+          (local.set $q ($cdr (local.get $c)))
+          ($while (i32.eqz ($nil? (local.get $q)))
+            ($unless ($or (call $dollar? ($car (local.get $q)))
+                          (call $cis ($car (local.get $q)) "i32"))
+              (call $die "sig: non-i32 valtype needs an explicit (type ...)"))
+            (local.set $q ($cdr (local.get $q)))))
+        (local.set $p ($cdr (local.get $p))))))
+
   ;; a field's signature, or -1 if it declares no function
   (func $field-sig (param $f i32) (result i32)
     ($when (call $his (local.get $f) "import")
@@ -1046,7 +1065,9 @@
               ($let (($tr (call $func-type-ref (local.get $d))))
                 (if (local.get $tr)
                   (then (call $uleb! (local.get $v) (call $type-index (local.get $mod) (local.get $tr))))
-                  (else (call $uleb! (local.get $v)
+                  (else
+                    (call $check-i32-sig (local.get $d))
+                    (call $uleb! (local.get $v)
                           (call $sig-index (local.get $mod) (call $sig-key (local.get $d)))))))))))
       (local.get $v)))
 
@@ -1060,7 +1081,9 @@
           ($let (($tr (call $func-type-ref (local.get $f))))
             (if (local.get $tr)
               (then (call $uleb! (local.get $v) (call $type-index (local.get $mod) (local.get $tr))))
-              (else (call $uleb! (local.get $v)
+              (else
+                (call $check-i32-sig (local.get $f))
+                (call $uleb! (local.get $v)
                       (call $sig-index (local.get $mod) (call $sig-key (local.get $f)))))))))
       (local.get $v)))
 
