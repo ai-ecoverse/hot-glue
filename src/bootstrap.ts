@@ -29,9 +29,11 @@ export type Node = number | string | Sym | Node[];
 
 // ------------------------------------------------------------ imports
 //
-// A top-level (use name.hma) splices the named file from the lookup
-// path in place of the form, once per name — the second use of a name
-// anywhere in the program splices nothing. Resolution is textual and
+// A (use name.hma) splices the named file from the lookup path in place
+// of the form, once per name — the second use of a name anywhere in the
+// program splices nothing. It is not restricted to the top level: a form
+// may pull a file into itself, which is how a (module …) is composed from
+// several files of functions. Resolution is textual and
 // byte-faithful: everything that is not a top-level use form passes
 // through verbatim, comments and strings respected, so all engines
 // that resolve imports produce the identical stream. The wasm driver
@@ -63,7 +65,7 @@ export function resolveUses(
       j++;
       out += src.slice(i, j);
       i = j;
-    } else if (c === '(' && depth === 0 && src.startsWith('use', i + 1) && /\s/.test(src[i + 4] ?? '')) {
+    } else if (c === '(' && src.startsWith('use', i + 1) && /\s/.test(src[i + 4] ?? '')) {
       const close = src.indexOf(')', i);
       if (close < 0) throw new Error('use: unclosed form');
       const name = src.slice(i + 4, close).trim();
