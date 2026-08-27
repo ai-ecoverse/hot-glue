@@ -431,11 +431,28 @@ const esc = (s: string) =>
     )
     .join('');
 
+// The flat, single-line rendering of a node does not depend on the indent
+// depth it is printed at, so memoize it. Without this, print() re-renders
+// every subtree once per level of nesting it sits under — quadratic in depth,
+// which the large self-hosting sources (as.hma, expand.hma) feel sharply.
+const flatCache = new WeakMap<Node[], string>();
+function printFlat(n: Node): string {
+  if (n instanceof Sym) return n.name;
+  if (typeof n === 'string') return `"${esc(n)}"`;
+  if (typeof n === 'number') return String(n);
+  let s = flatCache.get(n);
+  if (s === undefined) {
+    s = `(${n.map(printFlat).join(' ')})`;
+    flatCache.set(n, s);
+  }
+  return s;
+}
+
 export function print(n: Node, d = 0): string {
   if (n instanceof Sym) return n.name;
   if (typeof n === 'string') return `"${esc(n)}"`;
   if (typeof n === 'number') return String(n);
-  const flat = `(${n.map((x) => print(x)).join(' ')})`;
+  const flat = printFlat(n);
   if (d * 2 + flat.length <= 100) return flat;
   let i = 1;
   let line = print(n[0]);
