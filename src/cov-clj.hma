@@ -1,0 +1,53 @@
+;; cov-clj.hma — the Clojure accent, wearing the coverage meter.
+;;
+;; (use clj.hma) (use cov.hma) (use cov-clj.hma), in that order, and
+;; every branching macro expanded afterwards stamps a (hit) probe in
+;; each arm it can take. Code expanded before this file — or written
+;; in raw WAT (if ...) — stays below the meter. 100% coverage means:
+;; every arm of every sugared branch ran at least once.
+;;
+;; when and when-not probe only the taken body; the untaken path is
+;; not a probe, so a guard that never fires does not owe a test.
+;; $if, cond, and, or probe both arms; while probes the loop body.
+
+(defmacro $if (test then- else-)
+  `(if (result i32) (num ,test)
+     (then (hit) (num ,then-))
+     (else (hit) (num ,else-))))
+
+(defmacro when (test &rest body)
+  `(if (num ,test) (then (hit) ,@body)))
+
+(defmacro when-not (test &rest body)
+  `(if (i32.eqz (num ,test)) (then (hit) ,@body)))
+
+(defmacro cond (&rest clauses)
+  (if (= (length clauses) 0)
+      `(unreachable)
+      (if (sym-is? (first clauses) ":else")
+          `(splice (hit) (num ,(second clauses)))
+          `(if (result i32) (num ,(first clauses))
+             (then (hit) (num ,(second clauses)))
+             (else (cond ,@(rest (rest clauses))))))))
+
+(defmacro and (&rest xs)
+  (if (= (length xs) 1)
+      `(num ,(first xs))
+      `(if (result i32) (num ,(first xs))
+         (then (hit) (and ,@(rest xs)))
+         (else (hit) (i32.const 0)))))
+
+(defmacro or (&rest xs)
+  (if (= (length xs) 1)
+      `(num ,(first xs))
+      `(if (result i32) (num ,(first xs))
+         (then (hit) (i32.const 1))
+         (else (hit) (or ,@(rest xs))))))
+
+(defmacro while (test &rest body)
+  `(block $break
+     (loop $continue
+       (br_if $break (i32.eqz (num ,test)))
+       (hit)
+       ,@body
+       (br $continue))))

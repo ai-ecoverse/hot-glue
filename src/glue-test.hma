@@ -1,0 +1,229 @@
+;; glue-test.hma — clojure.test, poured hot.
+;;
+;; A test framework as a module fragment: splice it into a (module …)
+;; and write (deftest $name "description" body…) forms; (run-tests)
+;; expands to the whole suite in definition order, because deftest
+;; re-defines itself after every use, carrying the accumulated roster
+;; in its own macro body. No registry cells, no function table: the
+;; test plan is finished before the first byte of wasm exists.
+;;
+;;   (deftest $t-sum "adds" (is= (+ 1 2) 3))
+;;   (func (export "_start")
+;;     (run-tests)
+;;     (cov-report)
+;;     (if (call $t-sum?) (then (call $proc_exit (i32.const 1)))))
+;;
+;; Assertions: (is v), (is v "why"), (is= a b), (is-str p l "want"),
+;; and (is-fail body…) which passes exactly when its body fails once —
+;; the framework's own failure paths are testable, which is how this
+;; file reaches 100% on its own meter.
+;;
+;; Inside a test, (expect-fail) marks the whole test as expected to
+;; FAIL: the runner prints FAIL and then absorbs the damage.
+;;
+;; Memory: 0 iovec, 8 nwritten, 12–31 digit buffer, pool from 32.
+;; Framework state at 8704: +0 assert count, +4 failure count,
+;; +8 per-test snapshot, +12 expected-FAIL flag, +16 is-fail depth,
+;; +20 is-fail snapshot stack (four deep, unchecked).
+;; The coverage reporter reads the bitmap that cov.hma stamps; it is
+;; written in raw WAT because the meter cannot sit below itself.
+
+(use clj.hma)
+(use cov.hma)
+
+(import "wasi_snapshot_preview1" "fd_write"
+  (func $fd_write (param i32 i32 i32 i32) (result i32)))
+(import "wasi_snapshot_preview1" "proc_exit"
+  (func $proc_exit (param i32)))
+(memory (export "memory") 1)
+
+(defmacro t-asserts () `(i32.load (i32.const 8704)))
+(defmacro t-fails () `(i32.load (i32.const 8708)))
+(defmacro t-snap () `(i32.load (i32.const 8712)))
+(defmacro t-xflag () `(i32.load (i32.const 8716)))
+(defmacro t-xdepth () `(i32.load (i32.const 8720)))
+(defmacro t-asserts! (x) `(i32.store (i32.const 8704) ,x))
+(defmacro t-fails! (x) `(i32.store (i32.const 8708) ,x))
+(defmacro t-snap! (x) `(i32.store (i32.const 8712) ,x))
+(defmacro t-xflag! (x) `(i32.store (i32.const 8716) ,x))
+(defmacro t-xdepth! (x) `(i32.store (i32.const 8720) ,x))
+
+(func $print (param $p i32) (param $l i32)
+  (i32.store (i32.const 0) (local.get $p))
+  (i32.store (i32.const 4) (local.get $l))
+  (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8))))
+
+;; Decimal, signed, INT_MIN included: the magnitude is held negative,
+;; where all of i32 fits.
+(func $t-num (param $n i32)
+  (let [$p 32 $neg (neg? (local.get $n))]
+    (when-not (local.get $neg)
+      (local.set $n (- 0 (local.get $n))))
+    (local.set $p (dec (local.get $p)))
+    (i32.store8 (local.get $p) (- 48 (rem (local.get $n) 10)))
+    (local.set $n (quot (local.get $n) 10))
+    (while (not= (local.get $n) 0)
+      (local.set $p (dec (local.get $p)))
+      (i32.store8 (local.get $p) (- 48 (rem (local.get $n) 10)))
+      (local.set $n (quot (local.get $n) 10)))
+    (when (local.get $neg)
+      (local.set $p (dec (local.get $p)))
+      (i32.store8 (local.get $p) (i32.const 45)))
+    (call $print (local.get $p) (- 32 (local.get $p)))))
+
+(func $bytes= (param $ap i32) (param $al i32) (param $bp i32) (param $bl i32) (result i32)
+  (when (not= (local.get $al) (local.get $bl)) (return (i32.const 0)))
+  (let [$i 0]
+    (while (< (local.get $i) (local.get $al))
+      (when (not= (i32.load8_u (+ (local.get $ap) (local.get $i)))
+                  (i32.load8_u (+ (local.get $bp) (local.get $i))))
+        (return (i32.const 0)))
+      (local.set $i (inc (local.get $i))))
+    (i32.const 1)))
+
+;; ------------------------------------------------------- assertions
+
+(func $t-is (param $v i32)
+  (t-asserts! (inc (t-asserts)))
+  (when-not (local.get $v)
+    (t-fails! (inc (t-fails)))
+    (call $print "  is: failed\n")))
+
+(func $t-is-msg (param $v i32) (param $p i32) (param $l i32)
+  (t-asserts! (inc (t-asserts)))
+  (when-not (local.get $v)
+    (t-fails! (inc (t-fails)))
+    (call $print "  is: ")
+    (call $print (local.get $p) (local.get $l))
+    (call $print "\n")))
+
+(func $t-is= (param $a i32) (param $b i32)
+  (t-asserts! (inc (t-asserts)))
+  (when (not= (local.get $a) (local.get $b))
+    (t-fails! (inc (t-fails)))
+    (call $print "  is=: ")
+    (call $t-num (local.get $a))
+    (call $print " != ")
+    (call $t-num (local.get $b))
+    (call $print "\n")))
+
+(func $t-is-str (param $ap i32) (param $al i32) (param $bp i32) (param $bl i32)
+  (t-asserts! (inc (t-asserts)))
+  (when-not (call $bytes= (local.get $ap) (local.get $al) (local.get $bp) (local.get $bl))
+    (t-fails! (inc (t-fails)))
+    (call $print "  is-str: got \"")
+    (call $print (local.get $ap) (local.get $al))
+    (call $print "\"\n")))
+
+(defmacro is (v &rest msg)
+  (if (= (length msg) 0)
+      `(call $t-is (num ,v))
+      `(call $t-is-msg (num ,v) ,(first msg))))
+
+(defmacro is= (a b) `(call $t-is= (num ,a) (num ,b)))
+;; (is-str p l "want") or (is-str "got" "want"): a pooled literal
+;; lowers to its own ptr+len pair, so both spellings reach four params.
+(defmacro is-str (&rest args) `(call $t-is-str ,@args))
+
+;; (is-fail body…) — the body must fail exactly once; the failure is
+;; then forgiven and counted as one passing assertion. Nests.
+(func $xf-begin
+  (i32.store (+ 8724 (* 4 (t-xdepth))) (t-fails))
+  (t-xdepth! (inc (t-xdepth))))
+
+(func $xf-end
+  (t-xdepth! (dec (t-xdepth)))
+  (let [$s (i32.load (+ 8724 (* 4 (t-xdepth))))
+        $d (- (t-fails) (local.get $s))]
+    (when (= (local.get $d) 1)
+      (t-fails! (local.get $s))
+      (t-asserts! (inc (t-asserts))))
+    (when-not (= (local.get $d) 1)
+      (call $print "  is-fail: wanted one failure\n"))
+    (when (zero? (local.get $d))
+      (t-fails! (inc (local.get $s))))))
+
+(defmacro is-fail (&rest body)
+  `(splice (call $xf-begin) ,@body (call $xf-end)))
+
+(defmacro expect-fail () `(t-xflag! (i32.const 1)))
+
+;; ---------------------------------------------------------- runner
+
+(func $t-begin
+  (t-snap! (t-fails))
+  (t-xflag! (i32.const 0)))
+
+(func $t-end (param $p i32) (param $l i32)
+  (let [$bad (> (t-fails) (t-snap))]
+    (when (local.get $bad) (call $print "FAIL "))
+    (when-not (local.get $bad) (call $print "ok   "))
+    (call $print (local.get $p) (local.get $l))
+    (call $print "\n")
+    (when (and (t-xflag) (local.get $bad))
+      (t-fails! (t-snap)))))
+
+(defmacro run-one (name desc)
+  `(splice (call $t-begin) (call ,name) (call $t-end ,desc)))
+
+;; deftest, self-accumulating: each use emits the test function and a
+;; successor deftest whose body carries the roster grown by one, so
+;; run-tests is refrozen to the roster in definition order. The
+;; successor's body is one quasiquote — special forms resolve by name,
+;; so hygiene marks cannot strand it — and the literal (unquote n2)
+;; cells it must contain are built as (,(quote unquote) n2), because
+;; quasiquote does not nest but quote passes through it untouched.
+;; Only first/second/map/lambda and quasiquote are asked of the
+;; meta-language, which is the subset every expander here speaks.
+(defmacro deftest-with (acc name desc &rest body)
+  ((lambda (acc2)
+     ((lambda (calls)
+        `(splice
+           (func ,name ,@body)
+           (defmacro deftest (n2 d2 &rest b2)
+             (quasiquote
+               (deftest-with ,acc2
+                 (,(quote unquote) n2)
+                 (,(quote unquote) d2)
+                 (,(quote unquote-splicing) b2))))
+           (defmacro run-tests ()
+             (quote (splice ,@calls)))))
+      (map (lambda (t) `(run-one ,(first t) ,(second t))) acc2)))
+   `(,@acc (,name ,desc))))
+
+(defmacro deftest (name desc &rest body)
+  `(deftest-with () ,name ,desc ,@body))
+
+(defmacro run-tests () `(splice))
+
+;; ---------------------------------------------------------- summary
+
+;; Prints the tally; the caller decides what a nonzero return exits as.
+(func $t-sum? (result i32)
+  (call $print "\n")
+  (call $t-num (t-asserts))
+  (call $print " assertions, ")
+  (call $t-num (t-fails))
+  (call $print " failures\n")
+  (t-fails))
+
+;; The coverage reporter, in raw WAT: the meter cannot sit below
+;; itself, and a 100% run must not leave its own miss-arm unvisited.
+(func $cov-rep (param $n i32)
+  (local $i i32)
+  (local $h i32)
+  (block $done
+    (loop $go
+      (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
+      (if (i32.load8_u (i32.add (cov-base) (local.get $i)))
+          (then (local.set $h (i32.add (local.get $h) (i32.const 1))))
+          (else (call $print "miss ") (call $t-num (local.get $i)) (call $print "\n")))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $go)))
+  (call $print "coverage ")
+  (call $t-num (local.get $h))
+  (call $print "/")
+  (call $t-num (local.get $n))
+  (if (i32.eq (local.get $h) (local.get $n))
+      (then (call $print " (100%)\n"))
+      (else (call $print "\n"))))

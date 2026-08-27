@@ -17,7 +17,7 @@ File extension: `.hma`.
 
 ```sh
 npm install
-npm test                              # 15 suites, all under wasmtime
+npm test                              # 18 suites, all under wasmtime
 ```
 
 Expand a program to WAT with the stage-0 bootstrap and run it:
@@ -94,6 +94,40 @@ Every rung is the acceptance test for the one below it.
 
 `src/prelude.hma` is the macro library that makes WAT bearable at scale;
 `src/reel.hma` expands a declarative film into a wasm module.
+
+## Libraries, under their own meter
+
+Module fragments in the Clojure accent, composed into a `(module …)` with
+`(use …)`, and proven the house way — by the suite that measures itself:
+
+- **`src/json-read.hma`** — a streaming JSON reader. A pull parser over
+  windows of bytes the caller lends it: `$jr-fill` a chunk, ask `$jr-next`
+  for the next event, lend another when it answers *more*. Structural bytes
+  are never copied, the container stack is one bit per nesting level, and
+  only string and number tokens pass through a buffer the caller sizes —
+  a gigabyte of JSON parses in a few hundred bytes of state. Escapes
+  unwind, `\uXXXX` mints UTF-8, surrogate pairs fuse; numbers keep their
+  raw spelling so floats need no f64 to survive the trip.
+- **`src/json-write.hma`** — the mirror: call the shape of the document and
+  minimal JSON accretes in the caller's buffer. Commas place themselves
+  from one "has elements" bit per level; `$jw-int` prints any i32,
+  INT_MIN included, by holding the magnitude negative.
+- **`src/glue-test.hma`** — clojure.test, poured hot. `(deftest …)`
+  re-defines itself after every use, carrying the accumulated roster in
+  its own macro body, so `(run-tests)` expands to the whole suite before
+  the first byte of wasm exists. `(is-fail …)` forgives exactly one
+  failure, which is how the framework's failure paths test themselves.
+- **`src/cov.hma`** + **`src/cov-clj.hma`** — coverage as macros. `(hit)`
+  stamps a bitmap byte and re-defines itself to stamp the next: the probe
+  counter lives in the macro table, not in any runtime cell. `cov-clj`
+  re-defines the accent's branching macros so every arm pays a probe;
+  raw WAT `(if …)` stays below the meter, which is where the reporter
+  itself must stand.
+
+`test/json-suite.hma` holds the whole argument to 100%: every assertion
+and every probe, or FAIL. It passes three times over — expanded by stage
+0, assembled by `as.hma`'s own binary, and compiled by the wasm compiler
+with no TypeScript in the room.
 
 ## The binary wilderness
 
