@@ -431,19 +431,47 @@ const esc = (s: string) =>
     )
     .join('');
 
-export function print(n: Node, d = 0): string {
+// The flat, single-line rendering of a node does not depend on the indent
+// depth it is printed at, so memoize it. Without this, print() re-renders
+// every subtree once per level of nesting it sits under — quadratic in depth,
+// which the large self-hosting sources (as.hma, expand.hma) feel sharply.
+//
+// The cache lives for one top-level print() and no longer: a node is
+// immutable by convention, not by type, and this file hands out both print()
+// and a mutable Node[]. A cache that outlived the call would answer for the
+// tree as it was first seen rather than as it is. Within the call the tree
+// cannot change, which is where the quadratic behaviour lives anyway.
+type FlatCache = WeakMap<Node[], string>;
+
+function printFlat(n: Node, cache: FlatCache): string {
   if (n instanceof Sym) return n.name;
   if (typeof n === 'string') return `"${esc(n)}"`;
   if (typeof n === 'number') return String(n);
-  const flat = `(${n.map((x) => print(x)).join(' ')})`;
+  let s = cache.get(n);
+  if (s === undefined) {
+    s = `(${n.map((x) => printFlat(x, cache)).join(' ')})`;
+    cache.set(n, s);
+  }
+  return s;
+}
+
+export function print(n: Node, d = 0): string {
+  return printAt(n, d, new WeakMap());
+}
+
+function printAt(n: Node, d: number, cache: FlatCache): string {
+  if (n instanceof Sym) return n.name;
+  if (typeof n === 'string') return `"${esc(n)}"`;
+  if (typeof n === 'number') return String(n);
+  const flat = printFlat(n, cache);
   if (d * 2 + flat.length <= 100) return flat;
   let i = 1;
-  let line = print(n[0]);
-  while (i < n.length && !Array.isArray(n[i])) line += ' ' + print(n[i++]);
+  let line = printAt(n[0], 0, cache);
+  while (i < n.length && !Array.isArray(n[i])) line += ' ' + printAt(n[i++], 0, cache);
   const pad = '  '.repeat(d + 1);
   return `(${line}\n${n
     .slice(i)
-    .map((x) => pad + print(x, d + 1))
+    .map((x) => pad + printAt(x, d + 1, cache))
     .join('\n')})`;
 }
 
