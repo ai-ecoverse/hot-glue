@@ -17,7 +17,7 @@ File extension: `.hma`.
 
 ```sh
 npm install
-npm test                              # 18 suites, all under wasmtime
+npm test                              # 19 suites, all under wasmtime
 ```
 
 Expand a program to WAT with the stage-0 bootstrap and run it:
@@ -123,6 +123,15 @@ Module fragments in the Clojure accent, composed into a `(module …)` with
   re-defines the accent's branching macros so every arm pays a probe;
   raw WAT `(if …)` stays below the meter, which is where the reporter
   itself must stand.
+- **`src/glue-alloc.hma`** — the memory map, derived instead of
+  declared: `(take name size)` claims the next band and defines
+  `(name)` as its folded base. The allocator is a self-re-defining
+  macro — it lives in the macro table and is gone before the module
+  exists.
+- **`src/canary.hma`** — sentinels that die out loud. `(defcanary
+  addr)` posts a tripwire at a border; `(canaries-check)` traps the
+  program the moment one has changed. Silent corruption becomes a
+  crash with a location.
 
 Every base address lives in **`src/glue-mem.hma`** and nowhere else —
 reader at 8192, writer at 8448, framework at 8704, coverage bitmap at
@@ -130,6 +139,10 @@ reader at 8192, writer at 8448, framework at 8704, coverage bitmap at
 past 8192) ships its own copy of that one file: `(use …)` resolves
 names against the program's directory before the toolchain's, so the
 host's map loads first and the libraries follow it wherever it points.
+
+How these fare against wasm modules from the wild — shared memories,
+Zig bands, the i64 seam — is
+**[`docs/wilderness-memory.md`](docs/wilderness-memory.md)**.
 
 `test/json-suite.hma` holds the whole argument to 100%: every assertion
 and every probe, or FAIL. It passes three times over — expanded by stage
@@ -161,6 +174,14 @@ behind it. Hot Glue's civility compiles away before the border is reached.
   `wasi:webgpu` component instead of a Chromium tab, and the two renderers
   disagree on 0.04% of bytes — boundary pixels where two software Vulkans part
   company by one escape iteration.
+- **`examples/braid.hma`** — three civilizations, one linear memory, on
+  purpose: two Zig modules banded by `--global-base` and `--stack`, a
+  Hot Glue supervisor whose bands are `(take …)`n not pinned, canaries
+  on every border, and an explicit-typed adapter module for the u64
+  import — `wasm-merge` fuses the lot into one module with one memory,
+  the overlay some platforms force, done structurally instead of
+  luckily. `npm run build:braid`, then `wasmtime dist/braid.wasm`. The
+  doctrine is [`docs/wilderness-memory.md`](docs/wilderness-memory.md).
 - **`examples/perl-driver.hma`** — a supervisor with no memory of its own,
   importing zeroperl's and re-exporting it, so Perl 5 runs under plain wasmtime.
 - **`tools/emscripten-gates/`** — the doctrine for giants that ship only as
@@ -184,6 +205,7 @@ required to work on the language.
 | `examples/native/espeak.wasm` | `npm run build:espeak` (wasi-sdk; espeak-ng 1.51) | `SPEAK_WASI=1`, the pure-wasm voice |
 | `examples/oyster.npt` | `npm run train:oyster` (CPU PyTorch, ~820k params) | `test/gpt.test.ts`, the playground's prompt box |
 | `web/playground.html` | `npm run build:web` | the browser as expansion host |
+| `dist/braid.wasm` | `npm run build:braid` (zig; binaryen's wasm-merge) | `test/braid.test.ts`, the overlay done on purpose |
 | `tools/mandel-webgpu/wasi-gfx-runtime/` | `npm run build:webgpu` (clones and patches wasi-gfx-runtime; needs cargo and wasm-tools) | `GPU_WASI=1`, the browserless GPU path in `test/projector.test.ts` |
 
 Kokoro's weights arrive with `npm run fetch:kokoro`. The six patches under

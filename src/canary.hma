@@ -1,0 +1,55 @@
+;; canary.hma — sentinels that die out loud.
+;;
+;; A fixed memory map fails silently: the byte that lands in someone
+;; else's band corrupts quietly and the program keeps going. A canary
+;; turns that into a crash at the border. (defcanary addr) registers a
+;; four-byte sentinel — the address may be any expression, a literal
+;; or a (taken) or a band edge; (canaries-arm) writes every sentinel
+;; and (canaries-check) traps the program the moment one has changed.
+;; Arm at init, check wherever corruption must not pass — after a
+;; foreign call, before committing output, per request.
+;;
+;;   (defcanary 1048572)               ;; just below a Zig band
+;;   (take-guarded out-buf 256)        ;; a band with its own tripwire
+;;   … (canaries-arm) … (canaries-check)
+;;
+;; The roster accumulates the way deftest does: each defcanary
+;; re-defines itself carrying the list, so arm and check expand to
+;; plain stores and loads — no table, no loop, no runtime registry.
+;; The check is raw WAT and sits below the coverage meter: its trap
+;; arm is the one branch a healthy program can never visit.
+;;
+;; (take-guarded name size) needs glue-alloc.hma: it takes size+4 and
+;; posts the sentinel on the band's own frontier.
+
+(use clj.hma)
+
+(defmacro canary-alive () `(i32.const -559038737))
+
+(defmacro canary-arm1 (a)
+  `(i32.store (num ,a) (canary-alive)))
+
+(defmacro canary-check1 (a)
+  `(if (i32.ne (i32.load (num ,a)) (canary-alive))
+       (then (unreachable))))
+
+(defmacro canary-with (acc addr)
+  ((lambda (acc2)
+     ((lambda (arms checks)
+        `(splice
+           (defmacro defcanary (a2)
+             (quasiquote (canary-with ,acc2 (,(quote unquote) a2))))
+           (defmacro canaries-arm () (quote (splice ,@arms)))
+           (defmacro canaries-check () (quote (splice ,@checks)))))
+      (map (lambda (a) `(canary-arm1 ,a)) acc2)
+      (map (lambda (a) `(canary-check1 ,a)) acc2)))
+   `(,@acc ,addr)))
+
+(defmacro defcanary (a2) `(canary-with () ,a2))
+(defmacro canaries-arm () `(splice))
+(defmacro canaries-check () `(splice))
+
+(defmacro take-guarded (name size)
+  `(splice
+     (take ,name ,(+ size 4))
+     (defcanary (i32.add (,name) (i32.const ,size)))))

@@ -22,6 +22,12 @@
   (use glue-test.hma)
   (use json-read.hma)
   (use json-write.hma)
+  (use glue-alloc.hma)
+  (use canary.hma)
+
+  ;; bands taken from the allocator, one wearing its own tripwire
+  (take $t-band 64)
+  (take-guarded $t-scratch 60)
 
   ;; ------------------------------------------------------ helpers
 
@@ -537,6 +543,16 @@
     (is-fail (is-str "abc" "abd"))
     (is-fail (is-str "abc" "ab"))
     (is-fail (is-fail (is 1))))
+
+  (deftest $t-alloc "bands are taken, borders armed"
+    (is= ($t-band) 65536)
+    (is= ($t-scratch) 65600)
+    (is= (taken) 65664)
+    (canaries-arm)
+    ;; fill the guarded band to its brim — the sentinel survives
+    (memory.fill ($t-scratch) (i32.const 7) (i32.const 60))
+    (canaries-check)
+    (is= (i32.load (+ ($t-scratch) 56)) 117901063))
 
   (deftest $t-xfail "an expected FAIL is absorbed"
     (expect-fail)

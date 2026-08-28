@@ -1,0 +1,46 @@
+;; glue-alloc.hma — the memory map, derived instead of declared.
+;;
+;; (take name size) claims the next band of linear memory and defines
+;; (name) as its base, an (i32.const …) folded at expansion time; then
+;; take re-defines itself with the high-water mark moved up, the same
+;; way cov.hma numbers its probes: the allocator lives in the macro
+;; table and is gone by the time the module exists. (taken) is the
+;; current high-water mark, for asserting a footprint or arming
+;; a guard at the frontier.
+;;
+;;   (use glue-alloc.hma)
+;;   (take out-buf 256)
+;;   (take out-stk 8)
+;;   … (call $jw-init (out-buf) (i32.const 256) (out-stk) (i32.const 32))
+;;
+;; The floor is 65536 — the far side of the first page, which the
+;; interned string pool (from offset 32) can fill without reaching.
+;; (take-from addr) moves the floor before the first take, for hosts
+;; whose second page already belongs to someone.
+;;
+;; Sizes are taken verbatim: hand out multiples of 4 and alignment
+;; never comes up. Bands are assigned in (use …) order, so the map is
+;; a property of the build; print (taken) if you need it in daylight.
+;; This file and glue-mem.hma answer the same names two ways — pinned
+;; there, derived here. A host shadows glue-mem.hma with takes to move
+;; the JSON libraries onto the allocator.
+
+(defmacro take-at (base name size)
+  `(splice
+     (defmacro ,name () (quote (i32.const ,base)))
+     (defmacro taken () (quote (i32.const ,(+ base size))))
+     (defmacro take (n2 s2)
+       (quasiquote (take-at ,(+ base size)
+                     (,(quote unquote) n2)
+                     (,(quote unquote) s2))))))
+
+(defmacro take (n2 s2) `(take-at 65536 ,n2 ,s2))
+(defmacro taken () `(i32.const 65536))
+
+(defmacro take-from (floor)
+  `(splice
+     (defmacro take (n2 s2)
+       (quasiquote (take-at ,floor
+                     (,(quote unquote) n2)
+                     (,(quote unquote) s2))))
+     (defmacro taken () (quote (i32.const ,floor)))))
