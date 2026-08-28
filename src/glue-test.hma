@@ -22,13 +22,15 @@
 ;; FAIL: the runner prints FAIL and then absorbs the damage.
 ;;
 ;; Memory: 0 iovec, 8 nwritten, 12–31 digit buffer, pool from 32.
-;; Framework state at 8704: +0 assert count, +4 failure count,
-;; +8 per-test snapshot, +12 expected-FAIL flag, +16 is-fail depth,
-;; +20 is-fail snapshot stack (four deep, unchecked).
+;; Framework state at (t-base) — 8704 by glue-mem.hma, the one file a
+;; host shadows to move every base at once: +0 assert count,
+;; +4 failure count, +8 per-test snapshot, +12 expected-FAIL flag,
+;; +16 is-fail depth, +20 is-fail snapshot stack (four deep, unchecked).
 ;; The coverage reporter reads the bitmap that cov.hma stamps; it is
 ;; written in raw WAT because the meter cannot sit below itself.
 
 (use clj.hma)
+(use glue-mem.hma)
 (use cov.hma)
 
 (import "wasi_snapshot_preview1" "fd_write"
@@ -37,16 +39,16 @@
   (func $proc_exit (param i32)))
 (memory (export "memory") 1)
 
-(defmacro t-asserts () `(i32.load (i32.const 8704)))
-(defmacro t-fails () `(i32.load (i32.const 8708)))
-(defmacro t-snap () `(i32.load (i32.const 8712)))
-(defmacro t-xflag () `(i32.load (i32.const 8716)))
-(defmacro t-xdepth () `(i32.load (i32.const 8720)))
-(defmacro t-asserts! (x) `(i32.store (i32.const 8704) ,x))
-(defmacro t-fails! (x) `(i32.store (i32.const 8708) ,x))
-(defmacro t-snap! (x) `(i32.store (i32.const 8712) ,x))
-(defmacro t-xflag! (x) `(i32.store (i32.const 8716) ,x))
-(defmacro t-xdepth! (x) `(i32.store (i32.const 8720) ,x))
+(defmacro t-asserts () `(i32.load (t-base)))
+(defmacro t-fails () `(i32.load (i32.add (t-base) (i32.const 4))))
+(defmacro t-snap () `(i32.load (i32.add (t-base) (i32.const 8))))
+(defmacro t-xflag () `(i32.load (i32.add (t-base) (i32.const 12))))
+(defmacro t-xdepth () `(i32.load (i32.add (t-base) (i32.const 16))))
+(defmacro t-asserts! (x) `(i32.store (t-base) ,x))
+(defmacro t-fails! (x) `(i32.store (i32.add (t-base) (i32.const 4)) ,x))
+(defmacro t-snap! (x) `(i32.store (i32.add (t-base) (i32.const 8)) ,x))
+(defmacro t-xflag! (x) `(i32.store (i32.add (t-base) (i32.const 12)) ,x))
+(defmacro t-xdepth! (x) `(i32.store (i32.add (t-base) (i32.const 16)) ,x))
 
 (func $print (param $p i32) (param $l i32)
   (i32.store (i32.const 0) (local.get $p))
@@ -128,12 +130,12 @@
 ;; (is-fail body…) — the body must fail exactly once; the failure is
 ;; then forgiven and counted as one passing assertion. Nests.
 (func $xf-begin
-  (i32.store (+ 8724 (* 4 (t-xdepth))) (t-fails))
+  (i32.store (+ (t-base) 20 (* 4 (t-xdepth))) (t-fails))
   (t-xdepth! (inc (t-xdepth))))
 
 (func $xf-end
   (t-xdepth! (dec (t-xdepth)))
-  (let [$s (i32.load (+ 8724 (* 4 (t-xdepth))))
+  (let [$s (i32.load (+ (t-base) 20 (* 4 (t-xdepth))))
         $d (- (t-fails) (local.get $s))]
     (when (= (local.get $d) 1)
       (t-fails! (local.get $s))

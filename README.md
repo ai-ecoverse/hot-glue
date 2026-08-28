@@ -124,10 +124,18 @@ Module fragments in the Clojure accent, composed into a `(module …)` with
   raw WAT `(if …)` stays below the meter, which is where the reporter
   itself must stand.
 
+Every base address lives in **`src/glue-mem.hma`** and nowhere else —
+reader at 8192, writer at 8448, framework at 8704, coverage bitmap at
+16384. A host with its own memory map (say, a string pool that runs
+past 8192) ships its own copy of that one file: `(use …)` resolves
+names against the program's directory before the toolchain's, so the
+host's map loads first and the libraries follow it wherever it points.
+
 `test/json-suite.hma` holds the whole argument to 100%: every assertion
 and every probe, or FAIL. It passes three times over — expanded by stage
 0, assembled by `as.hma`'s own binary, and compiled by the wasm compiler
-with no TypeScript in the room.
+with no TypeScript in the room. The verdict needs no particular runner:
+wasmtime and `node:wasi` print the same transcript.
 
 ## The binary wilderness
 

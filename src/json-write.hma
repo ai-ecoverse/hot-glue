@@ -20,28 +20,31 @@
 ;; but polices resources: (jw-err) reads 0 ok, 1 buffer full, 2 stack
 ;; full, and once raised it sticks while further bytes are dropped.
 ;;
-;; State block at 8448; buffer and stack arrive through $jw-init.
+;; State block at (jw-base) — 8448 by glue-mem.hma; a host with its
+;; own memory map shadows that one file to move every base at once.
+;; Buffer and stack arrive through $jw-init.
 
 (use clj.hma)
+(use glue-mem.hma)
 
 (defmacro jw-do! (&rest xs) `(splice ,@xs))
 
-(defmacro jw-buf () `(i32.load (i32.const 8448)))
-(defmacro jw-buf! (x) `(i32.store (i32.const 8448) ,x))
-(defmacro jw-cap () `(i32.load (i32.const 8452)))
-(defmacro jw-cap! (x) `(i32.store (i32.const 8452) ,x))
-(defmacro jw-len () `(i32.load (i32.const 8456)))
-(defmacro jw-len! (x) `(i32.store (i32.const 8456) ,x))
-(defmacro jw-depth () `(i32.load (i32.const 8460)))
-(defmacro jw-depth! (x) `(i32.store (i32.const 8460) ,x))
-(defmacro jw-stk () `(i32.load (i32.const 8464)))
-(defmacro jw-stk! (x) `(i32.store (i32.const 8464) ,x))
-(defmacro jw-stk-cap () `(i32.load (i32.const 8468)))
-(defmacro jw-stk-cap! (x) `(i32.store (i32.const 8468) ,x))
-(defmacro jw-gap () `(i32.load (i32.const 8472)))
-(defmacro jw-gap! (x) `(i32.store (i32.const 8472) ,x))
-(defmacro jw-err () `(i32.load (i32.const 8476)))
-(defmacro jw-err! (x) `(i32.store (i32.const 8476) ,x))
+(defmacro jw-buf () `(i32.load (jw-base)))
+(defmacro jw-buf! (x) `(i32.store (jw-base) ,x))
+(defmacro jw-cap () `(i32.load (i32.add (jw-base) (i32.const 4))))
+(defmacro jw-cap! (x) `(i32.store (i32.add (jw-base) (i32.const 4)) ,x))
+(defmacro jw-len () `(i32.load (i32.add (jw-base) (i32.const 8))))
+(defmacro jw-len! (x) `(i32.store (i32.add (jw-base) (i32.const 8)) ,x))
+(defmacro jw-depth () `(i32.load (i32.add (jw-base) (i32.const 12))))
+(defmacro jw-depth! (x) `(i32.store (i32.add (jw-base) (i32.const 12)) ,x))
+(defmacro jw-stk () `(i32.load (i32.add (jw-base) (i32.const 16))))
+(defmacro jw-stk! (x) `(i32.store (i32.add (jw-base) (i32.const 16)) ,x))
+(defmacro jw-stk-cap () `(i32.load (i32.add (jw-base) (i32.const 20))))
+(defmacro jw-stk-cap! (x) `(i32.store (i32.add (jw-base) (i32.const 20)) ,x))
+(defmacro jw-gap () `(i32.load (i32.add (jw-base) (i32.const 24))))
+(defmacro jw-gap! (x) `(i32.store (i32.add (jw-base) (i32.const 24)) ,x))
+(defmacro jw-err () `(i32.load (i32.add (jw-base) (i32.const 28))))
+(defmacro jw-err! (x) `(i32.store (i32.add (jw-base) (i32.const 28)) ,x))
 
 (func $jw-init (param $p i32) (param $c i32) (param $sp i32) (param $sc i32)
   (jw-buf! (local.get $p))

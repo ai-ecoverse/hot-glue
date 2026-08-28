@@ -7,10 +7,11 @@
 ;; last (hit) — in practice, at the end of the module, where the
 ;; report belongs anyway.
 ;;
-;; The bitmap lives at 16384, one byte per probe, 4096 probes deep.
-;; Nothing here branches: the meter cannot be below itself.
+;; The bitmap lives at (cov-base) — 16384 by glue-mem.hma, one byte
+;; per probe, 4096 probes deep. Nothing here branches: the meter
+;; cannot be below itself.
 
-(defmacro cov-base () `(i32.const 16384))
+(use glue-mem.hma)
 
 (defmacro hit-at (n)
   `(splice
