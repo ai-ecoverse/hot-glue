@@ -13,6 +13,11 @@
 ;;   (take-guarded out-buf 256)        ;; a band with its own tripwire
 ;;   … (canaries-arm) … (canaries-check)
 ;;
+;; A guard that never fires is decoration. Prove each canary the way
+;; test/braid.test.ts does: a *-trap program that writes one word past
+;; a band and passes only if it traps — and never reaches its own
+;; complaint.
+;;
 ;; The roster accumulates the way deftest does: each defcanary
 ;; re-defines itself carrying the list, so arm and check expand to
 ;; plain stores and loads — no table, no loop, no runtime registry.

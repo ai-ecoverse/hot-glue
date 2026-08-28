@@ -80,6 +80,9 @@ self-re-defining macro, gone before the module exists, zero runtime
 cost. `(take-from addr)` moves the floor for hosts whose pages are
 already spoken for. `src/glue-mem.hma` remains the pinned alternative;
 the two answer the same names, and a host shadows one file either way.
+Sizes are handed out verbatim and guarded bands add 4 bytes each, so
+alignment drifts: a band that will hold an i64 should be taken first,
+straight off the 8-aligned floor.
 
 ### Borders that die out loud
 
@@ -89,7 +92,10 @@ name size)` gives a band its own tripwire. `(canaries-arm)` at init,
 `(canaries-check)` after foreign calls or per request: a write across
 a border becomes an immediate trap, not a value that was quietly wrong.
 The check is raw WAT, below the coverage meter, because its trap arm is
-the one branch a healthy program never visits.
+the one branch a healthy program never visits — which is why every
+canary owes a proof: a `*-trap` program that writes one word past its
+band and passes only if it dies at the tripwire without reaching its
+own complaint. A guard that never fires is decoration.
 
 ## The other seam: i64
 

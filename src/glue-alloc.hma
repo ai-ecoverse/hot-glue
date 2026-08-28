@@ -19,8 +19,13 @@
 ;; whose second page already belongs to someone.
 ;;
 ;; Sizes are taken verbatim: hand out multiples of 4 and alignment
-;; never comes up. Bands are assigned in (use …) order, so the map is
-;; a property of the build; print (taken) if you need it in daylight.
+;; never comes up — until something needs more than 4. An i64 store
+;; (a WASI clock scratch, say) wants an 8-aligned band, and guarded
+;; bands add 4 bytes each, so the running total drifts off 8 easily:
+;; take the stricter bands first, straight off the floor, where the
+;; alignment is still yours. Bands are assigned in (use …) order, so
+;; the map is a property of the build; print (taken) if you need it
+;; in daylight.
 ;; This file and glue-mem.hma answer the same names two ways — pinned
 ;; there, derived here. A host shadows glue-mem.hma with takes to move
 ;; the JSON libraries onto the allocator.

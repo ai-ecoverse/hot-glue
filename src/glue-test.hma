@@ -28,6 +28,11 @@
 ;; +16 is-fail depth, +20 is-fail snapshot stack (four deep, unchecked).
 ;; The coverage reporter reads the bitmap that cov.hma stamps; it is
 ;; written in raw WAT because the meter cannot sit below itself.
+;;
+;; Two pages of memory fit the default map. A host that moves t-base
+;; past 65536, or brings a runtime with claims of its own, should
+;; (memory.grow …) at the top of _start, before anything allocates —
+;; obvious once, mystifying the first time.
 
 (use clj.hma)
 (use glue-mem.hma)
