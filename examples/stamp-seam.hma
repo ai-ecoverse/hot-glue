@@ -1,0 +1,24 @@
+;; stamp-seam.hma — an adapter module for the i64 seam.
+;;
+;; Hot Glue's implicit signatures are i32-only, and explicit (type …)
+;; declarations are viral: one type field switches the whole module to
+;; explicit mode, every func then owing a (type $t) of its own. So a
+;; seam to i64-bearing foreign code gets a module of its own — small,
+;; fully typed, and quarantining the virality so the module behind it
+;; can stay in the implicit dialect. This is the same shape fx-proxy's
+;; generated glue.wasm takes; here it is written in Hot Glue itself.
+;;
+;; mix.zig's stamp takes a u64. The adapter accepts (lo hi) as two
+;; i32s — the only currency the implicit dialect trades in — and
+;; braids them into the i64 at the border.
+;;
+;;   npx tsx src/cli.ts examples/stamp-seam.hma > seam.wat
+
+(module
+  (type $t-j-i (func (param i64) (result i32)))
+  (type $t-ii-i (func (param i32 i32) (result i32)))
+  (import "mix" "stamp" (func $stamp (type $t-j-i)))
+  (func (export "stamp32") (type $t-ii-i) (param $lo i32) (param $hi i32) (result i32)
+    (call $stamp
+      (i64.or (i64.shl (i64.extend_i32_u (local.get $hi)) (i64.const 32))
+              (i64.extend_i32_u (local.get $lo))))))

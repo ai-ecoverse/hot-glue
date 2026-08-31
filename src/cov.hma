@@ -1,0 +1,28 @@
+;; cov.hma — coverage probes, numbered at expansion time.
+;;
+;; (hit) stamps one byte in the coverage bitmap and then redefines
+;; itself to stamp the next byte: the probe counter lives in the
+;; macro table, not in any runtime cell. (cov-total) expands to the
+;; count of probes numbered so far, so it must be expanded after the
+;; last (hit) — in practice, at the end of the module, where the
+;; report belongs anyway.
+;;
+;; The bitmap lives at (cov-base) — 16384 by glue-mem.hma, one byte
+;; per probe, 4096 probes deep. Nothing here branches: the meter
+;; cannot be below itself.
+
+(use glue-mem.hma)
+
+(defmacro hit-at (n)
+  `(splice
+     (defmacro hit () (quote (hit-at ,(+ n 1))))
+     (defmacro cov-total () (quote (i32.const ,(+ n 1))))
+     (i32.store8 (i32.add (cov-base) (i32.const ,n)) (i32.const 1))))
+
+(defmacro hit () (quote (hit-at 0)))
+(defmacro cov-total () (quote (i32.const 0)))
+
+;; The report call, for the end of _start: passes the final probe
+;; count to the runtime reporter (which glue-test.hma provides).
+(defmacro cov-report ()
+  `(call $cov-rep (cov-total)))

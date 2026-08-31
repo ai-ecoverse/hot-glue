@@ -1,5 +1,5 @@
 {
-  "name": "hot-glue",
+  "name": "@ai-ecoverse/hot-glue",
   "version": "0.1.0",
   "type": "module",
   "description": "A macro expander for WebAssembly, written in WebAssembly, operating on WebAssembly",
@@ -18,27 +18,30 @@
   },
   "main": "dist/bootstrap.js",
   "bin": {
-    "hotglue": "./src/cli.ts"
+    "hotglue": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/*.hma dist/",
+    "prepack": "npm run build",
     "build:as": "npx tsx src/cli.ts src/as.hma",
     "build:expand": "npx tsx src/cli.ts src/expand.hma",
     "build:expand-gc": "npx tsx src/cli.ts src/expand-gc.hma",
     "build:native": "clang --target=wasm32 -O2 -nostdlib -Wl,--no-entry -Wl,--export=poke -Wl,--export=crc32 examples/native/crc32.c -o examples/native/crc32.wasm && rustc --target wasm32-unknown-unknown --crate-type=cdylib -C opt-level=z -C lto -C strip=symbols -C panic=abort examples/native/fmix.rs -o examples/native/fmix.wasm",
-    "build:frei0r": "npx tsx src/cli.ts examples/mandelzoom.hma > /tmp/mandelzoom.wat && npx tsx src/cli.ts src/as.hma > /tmp/as.wat && wasmtime run --invoke run /tmp/as.wat < /tmp/mandelzoom.wat > /tmp/mandelzoom.wasm && node -e \"const b=require('fs').readFileSync('/tmp/mandelzoom.wasm');let o='const unsigned char hotglue_wasm[] = {';for(let i=0;i<b.length;i++)o+=(i%12?' ':'\\n  ')+'0x'+b[i].toString(16).padStart(2,'0')+',';o+='\\n};\\nconst unsigned int hotglue_wasm_len = '+b.length+';\\n';require('fs').writeFileSync('/tmp/mandelzoom_wasm.c',o)\" && clang -O2 -shared -fPIC -I \"$WASMTIME_CAPI/include\" examples/native/frei0r_hotglue.c /tmp/mandelzoom_wasm.c \"$WASMTIME_CAPI/lib/libwasmtime.a\" -lpthread -ldl -lm -o hotglue_mandel.so && echo 'built hotglue_mandel.so — run: FREI0R_PATH=$PWD ffmpeg -f lavfi -i frei0r_src=size=256x256:framerate=30:filter_name=hotglue_mandel:filter_params=x -t 5 out.mp4'",
+    "build:frei0r": "npx tsx src/cli.ts examples/mandelzoom.hma > /tmp/mandelzoom.wat && npx tsx src/cli.ts src/as.hma > /tmp/as.wat && wasmtime run --invoke run /tmp/as.wat < /tmp/mandelzoom.wat > /tmp/mandelzoom.wasm && node -e \"const b=require('fs').readFileSync('/tmp/mandelzoom.wasm');let o='const unsigned char hotglue_wasm[] = {';for(let i=0;i<b.length;i++)o+=(i%12?' ':'\\n  ')+'0x'+b[i].toString(16).padStart(2,'0')+',';o+='\\n};\\nconst unsigned int hotglue_wasm_len = '+b.length+';\\n';require('fs').writeFileSync('/tmp/mandelzoom_wasm.c',o)\" && clang -O2 -shared -fPIC -I \"$WASMTIME_CAPI/include\" examples/native/frei0r_hotglue.c /tmp/mandelzoom_wasm.c \"$WASMTIME_CAPI/lib/libwasmtime.a\" -lpthread -ldl -lm -o hotglue_mandel.so && echo 'built hotglue_mandel.so \u2014 run: FREI0R_PATH=$PWD ffmpeg -f lavfi -i frei0r_src=size=256x256:framerate=30:filter_name=hotglue_mandel:filter_params=x -t 5 out.mp4'",
     "build:web": "npx tsx src/build-web.ts",
     "build:ffmpeg": "bash scripts/build-ffmpeg-wasi.sh",
     "build:espeak": "bash scripts/build-espeak-wasi.sh",
     "build:webgpu": "bash scripts/build-mandel-webgpu.sh",
-    "bootstrap": "mkdir -p dist/hotglue && npx tsx src/cli.ts src/as.hma > dist/hotglue/as.wat && npx tsx src/cli.ts src/expand.hma > dist/hotglue/expand.wat && npx tsx src/cli.ts src/hotglue.hma > dist/hotglue/hotglue.wat && wasmtime run --invoke run dist/hotglue/as.wat < dist/hotglue/as.wat > dist/hotglue/as.wasm && wasmtime run --invoke run dist/hotglue/as.wat < dist/hotglue/expand.wat > dist/hotglue/expand.wasm && wasmtime run --invoke run dist/hotglue/as.wat < dist/hotglue/hotglue.wat > dist/hotglue/hotglue.wasm && echo 'bootstrap done — now: npm run -s compile -- program.hma > program.wasm'",
+    "bootstrap": "mkdir -p dist/hotglue && npx tsx src/cli.ts src/as.hma > dist/hotglue/as.wat && npx tsx src/cli.ts src/expand.hma > dist/hotglue/expand.wat && npx tsx src/cli.ts src/hotglue.hma > dist/hotglue/hotglue.wat && wasmtime run --invoke run dist/hotglue/as.wat < dist/hotglue/as.wat > dist/hotglue/as.wasm && wasmtime run --invoke run dist/hotglue/as.wat < dist/hotglue/expand.wat > dist/hotglue/expand.wasm && wasmtime run --invoke run dist/hotglue/as.wat < dist/hotglue/hotglue.wat > dist/hotglue/hotglue.wasm && echo 'bootstrap done \u2014 now: npm run -s compile -- program.hma > program.wasm'",
     "compile": "wasmtime --dir src --dir examples --dir . --preload expand=dist/hotglue/expand.wasm --preload as=dist/hotglue/as.wasm dist/hotglue/hotglue.wasm",
     "fetch:kokoro": "mkdir -p models/kokoro/onnx models/kokoro/voices && B=https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main && curl -LsSf -o models/kokoro/config.json $B/config.json && curl -LsSf -o models/kokoro/tokenizer.json $B/tokenizer.json && curl -LsSf -o models/kokoro/tokenizer_config.json $B/tokenizer_config.json && curl -LsSf -o models/kokoro/onnx/model_quantized.onnx $B/onnx/model_quantized.onnx && curl -LsSf -o models/kokoro/voices/af_heart.bin $B/voices/af_heart.bin",
     "perlmutt": "node scripts/perlmutt.mjs",
     "train:oyster": "python3 scripts/train-oyster.py",
     "film": "npm run -s bootstrap > /dev/null && wasmtime --dir src --dir examples --preload expand=dist/hotglue/expand.wasm --preload as=dist/hotglue/as.wasm dist/hotglue/hotglue.wasm film.hma > dist/film.wasm && node scripts/projector.mjs dist/film.wasm",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:zig": "zig build-exe examples/native/fnv.zig -target wasm32-freestanding -O ReleaseSmall -fno-entry --import-memory --initial-memory=2097152 --global-base=1048576 --stack 8192 --export=fnv1a --export=motto_ptr --export=motto_len -femit-bin=examples/native/fnv.wasm && zig build-exe examples/native/mix.zig -target wasm32-freestanding -O ReleaseSmall -fno-entry --import-memory --initial-memory=2097152 --global-base=1179648 --stack 8192 --export=stamp -femit-bin=examples/native/mix.wasm",
+    "build:braid": "npm run -s build:zig && mkdir -p dist && npx tsx src/cli.ts src/as.hma > dist/as.wat && npx tsx src/cli.ts examples/braid.hma > dist/braid-sup.wat && npx tsx src/cli.ts examples/stamp-seam.hma > dist/braid-seam.wat && wasmtime run --invoke run dist/as.wat < dist/braid-sup.wat > dist/braid-sup.wasm && wasmtime run --invoke run dist/as.wat < dist/braid-seam.wat > dist/braid-seam.wasm && wasm-merge dist/braid-sup.wasm env examples/native/fnv.wasm fnv examples/native/mix.wasm mix dist/braid-seam.wasm seam -o dist/braid.wasm && echo 'dist/braid.wasm \u2014 run: wasmtime dist/braid.wasm'"
   },
   "devDependencies": {
     "@6over3/zeroperl-ts": "^1.0.10",
@@ -48,9 +51,27 @@
     "binaryen": "^132.0.0",
     "kokoro-js": "^1.2.1",
     "playwright-core": "^1.62.1",
+    "semantic-release": "^25.0.9",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "binaryen": "^132.0.0"
+  },
+  "peerDependenciesMeta": {
+    "binaryen": {
+      "optional": true
+    }
+  }
 }

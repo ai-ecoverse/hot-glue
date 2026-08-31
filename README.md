@@ -15,9 +15,24 @@ File extension: `.hma`.
 
 ## Quick start
 
+Use the expander without installing anything:
+
+```sh
+npx @ai-ecoverse/hot-glue program.hma > program.wat
+wasmtime program.wat
+```
+
+The prelude travels with it, so `(use prelude.hma)` resolves against the sources
+shipped beside the program — there is no checkout for it to need. `--help` says
+the rest; `-O` emits optimized wasm instead of WAT, if the optional `binaryen`
+peer is installed. To keep it around, `npm install -g @ai-ecoverse/hot-glue`
+and call it `hotglue`.
+
+Or work on the language itself:
+
 ```sh
 npm install
-npm test                              # 15 suites, all under wasmtime
+npm test                              # 20 suites, all under wasmtime
 ```
 
 Expand a program to WAT with the stage-0 bootstrap and run it:
@@ -95,6 +110,61 @@ Every rung is the acceptance test for the one below it.
 `src/prelude.hma` is the macro library that makes WAT bearable at scale;
 `src/reel.hma` expands a declarative film into a wasm module.
 
+## Libraries, under their own meter
+
+Module fragments in the Clojure accent, composed into a `(module …)` with
+`(use …)`, and proven the house way — by the suite that measures itself:
+
+- **`src/json-read.hma`** — a streaming JSON reader. A pull parser over
+  windows of bytes the caller lends it: `$jr-fill` a chunk, ask `$jr-next`
+  for the next event, lend another when it answers *more*. Structural bytes
+  are never copied, the container stack is one bit per nesting level, and
+  only string and number tokens pass through a buffer the caller sizes —
+  a gigabyte of JSON parses in a few hundred bytes of state. Escapes
+  unwind, `\uXXXX` mints UTF-8, surrogate pairs fuse; numbers keep their
+  raw spelling so floats need no f64 to survive the trip.
+- **`src/json-write.hma`** — the mirror: call the shape of the document and
+  minimal JSON accretes in the caller's buffer. Commas place themselves
+  from one "has elements" bit per level; `$jw-int` prints any i32,
+  INT_MIN included, by holding the magnitude negative.
+- **`src/glue-test.hma`** — clojure.test, poured hot. `(deftest …)`
+  re-defines itself after every use, carrying the accumulated roster in
+  its own macro body, so `(run-tests)` expands to the whole suite before
+  the first byte of wasm exists. `(is-fail …)` forgives exactly one
+  failure, which is how the framework's failure paths test themselves.
+- **`src/cov.hma`** + **`src/cov-clj.hma`** — coverage as macros. `(hit)`
+  stamps a bitmap byte and re-defines itself to stamp the next: the probe
+  counter lives in the macro table, not in any runtime cell. `cov-clj`
+  re-defines the accent's branching macros so every arm pays a probe;
+  raw WAT `(if …)` stays below the meter, which is where the reporter
+  itself must stand.
+- **`src/glue-alloc.hma`** — the memory map, derived instead of
+  declared: `(take name size)` claims the next band and defines
+  `(name)` as its folded base. The allocator is a self-re-defining
+  macro — it lives in the macro table and is gone before the module
+  exists.
+- **`src/canary.hma`** — sentinels that die out loud. `(defcanary
+  addr)` posts a tripwire at a border; `(canaries-check)` traps the
+  program the moment one has changed. Silent corruption becomes a
+  crash with a location.
+
+Every base address lives in **`src/glue-mem.hma`** and nowhere else —
+reader at 8192, writer at 8448, framework at 8704, coverage bitmap at
+16384. A host with its own memory map (say, a string pool that runs
+past 8192) ships its own copy of that one file: `(use …)` resolves
+names against the program's directory before the toolchain's, so the
+host's map loads first and the libraries follow it wherever it points.
+
+How these fare against wasm modules from the wild — shared memories,
+Zig bands, the i64 seam — is
+**[`docs/wilderness-memory.md`](docs/wilderness-memory.md)**.
+
+`test/json-suite.hma` holds the whole argument to 100%: every assertion
+and every probe, or FAIL. It passes three times over — expanded by stage
+0, assembled by `as.hma`'s own binary, and compiled by the wasm compiler
+with no TypeScript in the room. The verdict needs no particular runner:
+wasmtime and `node:wasi` print the same transcript.
+
 ## The binary wilderness
 
 A module boundary is a module boundary regardless of what civilization lies
@@ -119,6 +189,14 @@ behind it. Hot Glue's civility compiles away before the border is reached.
   `wasi:webgpu` component instead of a Chromium tab, and the two renderers
   disagree on 0.04% of bytes — boundary pixels where two software Vulkans part
   company by one escape iteration.
+- **`examples/braid.hma`** — three civilizations, one linear memory, on
+  purpose: two Zig modules banded by `--global-base` and `--stack`, a
+  Hot Glue supervisor whose bands are `(take …)`n not pinned, canaries
+  on every border, and an explicit-typed adapter module for the u64
+  import — `wasm-merge` fuses the lot into one module with one memory,
+  the overlay some platforms force, done structurally instead of
+  luckily. `npm run build:braid`, then `wasmtime dist/braid.wasm`. The
+  doctrine is [`docs/wilderness-memory.md`](docs/wilderness-memory.md).
 - **`examples/perl-driver.hma`** — a supervisor with no memory of its own,
   importing zeroperl's and re-exporting it, so Perl 5 runs under plain wasmtime.
 - **`tools/emscripten-gates/`** — the doctrine for giants that ship only as
@@ -142,6 +220,7 @@ required to work on the language.
 | `examples/native/espeak.wasm` | `npm run build:espeak` (wasi-sdk; espeak-ng 1.51) | `SPEAK_WASI=1`, the pure-wasm voice |
 | `examples/oyster.npt` | `npm run train:oyster` (CPU PyTorch, ~820k params) | `test/gpt.test.ts`, the playground's prompt box |
 | `web/playground.html` | `npm run build:web` | the browser as expansion host |
+| `dist/braid.wasm` | `npm run build:braid` (zig; binaryen's wasm-merge) | `test/braid.test.ts`, the overlay done on purpose |
 | `tools/mandel-webgpu/wasi-gfx-runtime/` | `npm run build:webgpu` (clones and patches wasi-gfx-runtime; needs cargo and wasm-tools) | `GPU_WASI=1`, the browserless GPU path in `test/projector.test.ts` |
 
 Kokoro's weights arrive with `npm run fetch:kokoro`. The six patches under
@@ -159,6 +238,50 @@ demands; they are upstream-shaped and apply with `git am`.
   component work (`scripts/make-envelope.mjs`, `test/envelope.test.ts`), a full
   Chromium for the playground and WebGPU tests (Playwright's stripped headless
   has no `navigator.gpu` — ask for the full build).
+
+## Releases
+
+Published to npm as
+[`@ai-ecoverse/hot-glue`](https://www.npmjs.com/package/@ai-ecoverse/hot-glue).
+Nobody types a version number: when `main` moves, `semantic-release` reads the
+next one off the commit log, and `.github/workflows/release.yml` runs the gate,
+publishes the tarball, tags the commit and writes the GitHub release.
+
+The gate is `scripts/verify.sh`, and CI runs the same script on every branch —
+the same script, not a second copy of its steps, so a green pull request means a
+green release. It builds, runs the suite, then packs the tarball, installs it
+somewhere else entirely, and uses it: `main` resolves, the bin runs without tsx,
+and a piped `(use prelude.hma)` finds the prelude with no checkout to find it in.
+That last part is what the suite cannot see, because the suite runs against
+`src/`. Run it yourself with `bash scripts/verify.sh`.
+
+Which makes the subject line load-bearing.
+
+| Subject line | Bump | |
+|---|---|---|
+| `fix: …` | patch | 0.1.0 → 0.1.1 |
+| `feat: …` | minor | 0.1.0 → 0.2.0 |
+| any commit with a `BREAKING CHANGE:` footer | major | 0.1.0 → 1.0.0 |
+| anything else | none | — |
+
+Prose is still welcome. It moves to the body, under a conventional subject.
+
+No npm token is stored anywhere. The workflow asks GitHub for an OIDC token and
+npm trusts *the repository and the workflow file* rather than a secret somebody
+has to rotate; the tarball gets a provenance attestation on the way past. The
+one-time setup is on npmjs.com, under the package's **Trusted publisher**
+settings: GitHub Actions, `ai-ecoverse/hot-glue`, workflow `release.yml`.
+
+0.1.0 went out by hand, because npm has no settings page for a package that does
+not exist yet and therefore nowhere to name a trusted publisher before the first
+publish ([npm/cli#8544](https://github.com/npm/cli/issues/8544)). It is the only
+release without a provenance attestation. Everything from 0.1.1 on is the
+workflow's.
+
+The published tarball is `dist/`: the compiled stage-0 bootstrap, and the `.hma`
+sources beside it, where `(use prelude.hma)` looks for them. Everything else —
+the tests, the examples, the film, the recipes below — stays here in the
+repository.
 
 ## Where this came from
 

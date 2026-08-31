@@ -1,0 +1,195 @@
+;; json-write.hma — a streaming JSON writer.
+;;
+;; The mirror of json-read.hma: call the shape of the document and
+;; minimal JSON accretes in the caller's buffer. Commas place
+;; themselves — one "has elements" bit per open container, plus a
+;; flag for the gap between a key and its value, is the entire
+;; grammar of comma. Nothing allocates; nothing is buffered twice.
+;;
+;;   (call $jw-map-open) (call $jw-key "glue") (call $jw-int (i32.const 450))
+;;   (call $jw-map-close)                          ;; {"glue":450}
+;;
+;; $jw-str escapes: quote, backslash, \b \f \n \r \t by name, other
+;; control bytes as \u00XX; bytes above 0x1f pass through, so UTF-8
+;; rides for free. $jw-num echoes a spelling the reader tokenized —
+;; floats round-trip without either side owning an f64. $jw-int
+;; prints any i32, INT_MIN included, by holding the magnitude
+;; negative and healing the digit order in place.
+;;
+;; The writer trusts the call sequence (a key in an array is on you)
+;; but polices resources: (jw-err) reads 0 ok, 1 buffer full, 2 stack
+;; full, and once raised it sticks while further bytes are dropped.
+;;
+;; State block at (jw-base) — 8448 by glue-mem.hma; a host with its
+;; own memory map shadows that one file to move every base at once.
+;; Buffer and stack arrive through $jw-init.
+
+(use clj.hma)
+(use glue-mem.hma)
+
+(defmacro jw-do! (&rest xs) `(splice ,@xs))
+
+(defmacro jw-buf () `(i32.load (jw-base)))
+(defmacro jw-buf! (x) `(i32.store (jw-base) ,x))
+(defmacro jw-cap () `(i32.load (i32.add (jw-base) (i32.const 4))))
+(defmacro jw-cap! (x) `(i32.store (i32.add (jw-base) (i32.const 4)) ,x))
+(defmacro jw-len () `(i32.load (i32.add (jw-base) (i32.const 8))))
+(defmacro jw-len! (x) `(i32.store (i32.add (jw-base) (i32.const 8)) ,x))
+(defmacro jw-depth () `(i32.load (i32.add (jw-base) (i32.const 12))))
+(defmacro jw-depth! (x) `(i32.store (i32.add (jw-base) (i32.const 12)) ,x))
+(defmacro jw-stk () `(i32.load (i32.add (jw-base) (i32.const 16))))
+(defmacro jw-stk! (x) `(i32.store (i32.add (jw-base) (i32.const 16)) ,x))
+(defmacro jw-stk-cap () `(i32.load (i32.add (jw-base) (i32.const 20))))
+(defmacro jw-stk-cap! (x) `(i32.store (i32.add (jw-base) (i32.const 20)) ,x))
+(defmacro jw-gap () `(i32.load (i32.add (jw-base) (i32.const 24))))
+(defmacro jw-gap! (x) `(i32.store (i32.add (jw-base) (i32.const 24)) ,x))
+(defmacro jw-err () `(i32.load (i32.add (jw-base) (i32.const 28))))
+(defmacro jw-err! (x) `(i32.store (i32.add (jw-base) (i32.const 28)) ,x))
+
+(func $jw-init (param $p i32) (param $c i32) (param $sp i32) (param $sc i32)
+  (jw-buf! (local.get $p))
+  (jw-cap! (local.get $c))
+  (jw-len! (i32.const 0))
+  (jw-depth! (i32.const 0))
+  (jw-stk! (local.get $sp))
+  (jw-stk-cap! (local.get $sc))
+  (jw-gap! (i32.const 0))
+  (jw-err! (i32.const 0)))
+
+(func $jw-put (param $b i32)
+  (when (= (jw-len) (jw-cap))
+    (jw-err! (i32.const 1))
+    (return))
+  (i32.store8 (+ (jw-buf) (jw-len)) (local.get $b))
+  (jw-len! (inc (jw-len))))
+
+(func $jw-bytes (param $p i32) (param $l i32)
+  (let [$i 0]
+    (while (< (local.get $i) (local.get $l))
+      (call $jw-put (i32.load8_u (+ (local.get $p) (local.get $i))))
+      (local.set $i (inc (local.get $i))))))
+
+;; ------------------------------------------ the grammar of comma
+
+;; the "has elements" bit of the innermost open container
+(func $jw-mark (result i32)
+  (bit-and (i32.load8_u (+ (jw-stk) (quot (dec (jw-depth)) 8)))
+           (bit-shift-left 1 (rem (dec (jw-depth)) 8))))
+
+(func $jw-mark!
+  (i32.store8 (+ (jw-stk) (quot (dec (jw-depth)) 8))
+    (bit-or (i32.load8_u (+ (jw-stk) (quot (dec (jw-depth)) 8)))
+            (bit-shift-left 1 (rem (dec (jw-depth)) 8)))))
+
+;; before any element: a comma if a sibling came before, nothing if
+;; this value fills the gap a key just opened
+(func $jw-elem
+  (when (jw-gap)
+    (jw-gap! (i32.const 0))
+    (return))
+  (when (pos? (jw-depth))
+    (when (call $jw-mark)
+      (call $jw-put (i32.const 44)))
+    (call $jw-mark!)))
+
+;; ---------------------------------------------------- containers
+
+(func $jw-open (param $b i32)
+  (call $jw-elem)
+  (when (= (jw-depth) (jw-stk-cap))
+    (jw-err! (i32.const 2))
+    (return))
+  (jw-depth! (inc (jw-depth)))
+  (i32.store8 (+ (jw-stk) (quot (dec (jw-depth)) 8))
+    (bit-and (i32.load8_u (+ (jw-stk) (quot (dec (jw-depth)) 8)))
+             (bit-xor (bit-shift-left 1 (rem (dec (jw-depth)) 8)) -1)))
+  (call $jw-put (local.get $b)))
+
+(func $jw-map-open (call $jw-open (i32.const 123)))
+(func $jw-arr-open (call $jw-open (i32.const 91)))
+
+(func $jw-map-close
+  (jw-depth! (dec (jw-depth)))
+  (call $jw-put (i32.const 125)))
+
+(func $jw-arr-close
+  (jw-depth! (dec (jw-depth)))
+  (call $jw-put (i32.const 93)))
+
+;; --------------------------------------------------------- values
+
+(func $jw-hex (param $d i32) (result i32)
+  ($if (< (local.get $d) 10)
+       (+ (local.get $d) 48)
+       (+ (local.get $d) 87)))
+
+(func $jw-qstr (param $p i32) (param $l i32)
+  (let [$i 0 $b 0]
+    (call $jw-put (i32.const 34))
+    (while (< (local.get $i) (local.get $l))
+      (local.set $b (i32.load8_u (+ (local.get $p) (local.get $i))))
+      (cond (= (local.get $b) 34) (jw-do! (call $jw-put (i32.const 92)) (call $jw-put (i32.const 34)) (i32.const 0))
+            (= (local.get $b) 92) (jw-do! (call $jw-put (i32.const 92)) (call $jw-put (i32.const 92)) (i32.const 0))
+            (= (local.get $b) 8) (jw-do! (call $jw-put (i32.const 92)) (call $jw-put (i32.const 98)) (i32.const 0))
+            (= (local.get $b) 12) (jw-do! (call $jw-put (i32.const 92)) (call $jw-put (i32.const 102)) (i32.const 0))
+            (= (local.get $b) 10) (jw-do! (call $jw-put (i32.const 92)) (call $jw-put (i32.const 110)) (i32.const 0))
+            (= (local.get $b) 13) (jw-do! (call $jw-put (i32.const 92)) (call $jw-put (i32.const 114)) (i32.const 0))
+            (= (local.get $b) 9) (jw-do! (call $jw-put (i32.const 92)) (call $jw-put (i32.const 116)) (i32.const 0))
+            (< (local.get $b) 32)
+              (jw-do!
+                (call $jw-bytes "\\u00")
+                (call $jw-put (call $jw-hex (unsigned-bit-shift-right (local.get $b) 4)))
+                (call $jw-put (call $jw-hex (bit-and (local.get $b) 15)))
+                (i32.const 0))
+            :else (jw-do! (call $jw-put (local.get $b)) (i32.const 0)))
+      (drop)
+      (local.set $i (inc (local.get $i))))
+    (call $jw-put (i32.const 34))))
+
+(func $jw-key (param $p i32) (param $l i32)
+  (call $jw-elem)
+  (call $jw-qstr (local.get $p) (local.get $l))
+  (call $jw-put (i32.const 58))
+  (jw-gap! (i32.const 1)))
+
+(func $jw-str (param $p i32) (param $l i32)
+  (call $jw-elem)
+  (call $jw-qstr (local.get $p) (local.get $l)))
+
+;; a number's raw spelling, e.g. straight from (jr-tok-ptr)
+(func $jw-num (param $p i32) (param $l i32)
+  (call $jw-elem)
+  (call $jw-bytes (local.get $p) (local.get $l)))
+
+(func $jw-int (param $n i32)
+  (let [$neg (neg? (local.get $n)) $s 0 $e 0 $t 0]
+    (call $jw-elem)
+    (when-not (local.get $neg)
+      (local.set $n (- 0 (local.get $n))))
+    (when (local.get $neg)
+      (call $jw-put (i32.const 45)))
+    (local.set $s (jw-len))
+    (call $jw-put (- 48 (rem (local.get $n) 10)))
+    (local.set $n (quot (local.get $n) 10))
+    (while (not= (local.get $n) 0)
+      (call $jw-put (- 48 (rem (local.get $n) 10)))
+      (local.set $n (quot (local.get $n) 10)))
+    ;; heal the digit order in place
+    (local.set $e (dec (jw-len)))
+    (while (< (local.get $s) (local.get $e))
+      (local.set $t (i32.load8_u (+ (jw-buf) (local.get $s))))
+      (i32.store8 (+ (jw-buf) (local.get $s)) (i32.load8_u (+ (jw-buf) (local.get $e))))
+      (i32.store8 (+ (jw-buf) (local.get $e)) (local.get $t))
+      (local.set $s (inc (local.get $s)))
+      (local.set $e (dec (local.get $e))))))
+
+(func $jw-bool (param $v i32)
+  (call $jw-elem)
+  ($if (local.get $v)
+       (jw-do! (call $jw-bytes "true") (i32.const 0))
+       (jw-do! (call $jw-bytes "false") (i32.const 0)))
+  (drop))
+
+(func $jw-nil
+  (call $jw-elem)
+  (call $jw-bytes "null"))

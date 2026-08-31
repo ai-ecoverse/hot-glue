@@ -1,0 +1,68 @@
+# Publish @ai-ecoverse/hot-glue to npm with semantic-release.
+#
+# No npm token. The job proves its identity to the registry with a GitHub
+# OIDC token (npm trusted publishing), which also gets the tarball a
+# provenance attestation for free. The one-time setup is on npmjs.com:
+# package settings -> Trusted publisher -> GitHub Actions, this repository,
+# workflow `release.yml`.
+#
+# The version comes from the commit messages, not from package.json:
+# `fix:` bumps the patch, `feat:` the minor, a `BREAKING CHANGE:` footer
+# the major. A commit with no conventional prefix releases nothing.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # push the version tag and create the GitHub release
+      issues: write        # comment on issues the release closes
+      pull-requests: write # and on the pull requests
+      id-token: write      # mint the OIDC token npm trusts
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # semantic-release reads the whole tag history
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      # Every rung above stage 0 is proven by running it. Everything else
+      # the suite reaches for — Chromium, ffmpeg.wasm, the GPU runtime —
+      # it skips when absent, so this is the only tool the gate needs.
+      - name: Install wasmtime
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+
+      - run: npm ci
+
+      # The identical script CI runs on every branch — which is what makes
+      # a green pull request mean a green release.
+      - run: bash scripts/verify.sh
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Empty unless the secret exists, and empty means "use OIDC". It is
+          # here for the chicken-and-egg of the first publish: npmjs.com has no
+          # settings page for a package that does not exist yet, so if it will
+          # not take a trusted publisher up front, set NPM_TOKEN to a granular
+          # token for one run, then configure the publisher and delete it.
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npx semantic-release

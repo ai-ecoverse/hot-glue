@@ -1,0 +1,77 @@
+;; braid.hma — three civilizations, one linear memory, on purpose.
+;;
+;; The Fastly lesson, rehearsed at home: a platform that allows one
+;; memory per module and no nested instantiation forces the overlay
+;; link — wasm-merge fuses every module into one address space and
+;; the boundary that was the memory protection dissolves. This
+;; example is that fusion done structurally instead of luckily:
+;;
+;;   0     .. ~4 KB    this module: pool from 32, jw state at 8448
+;;   64 KB .. (taken)  bands claimed by (take …), guarded
+;;   1 MB  .. +8.2 KB  fnv.zig — data then stack, both banded by
+;;                     --global-base and --stack at build time
+;;   1.125 MB ..       mix.zig, banded the same way
+;;
+;; Every border wears a canary, armed at start and checked after the
+;; foreign calls; a Zig stack excursion past its band dies loudly at
+;; the tripwire instead of quietly in our state. The i64-taking
+;; stamp import crosses through stamp-seam.hma, the explicit-typed
+;; adapter module, so this module stays in the implicit dialect.
+;;
+;; Build and run (zig, binaryen's wasm-merge, wasmtime):
+;;
+;;   npm run build:braid
+;;   wasmtime dist/braid.wasm
+;;
+;; The proof of the shared memory runs both directions: fnv.zig hashes
+;; its own motto out of Zig data, this module hashes an identical
+;; string out of the Hot Glue pool, and the hashes must agree.
+
+(use clj.hma)
+(use glue-alloc.hma)
+(use canary.hma)
+
+(module
+  (import "fnv" "fnv1a" (func $fnv1a (param i32 i32) (result i32)))
+  (import "fnv" "motto_ptr" (func $motto_ptr (result i32)))
+  (import "fnv" "motto_len" (func $motto_len (result i32)))
+  (import "seam" "stamp32" (func $stamp32 (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_write"
+    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 32)
+
+  (use json-write.hma)
+
+  ;; the glue bands, taken not pinned
+  (take-guarded $out 252)
+  (take $wstk 8)
+
+  ;; the borders: one sentinel under each Zig band
+  (defcanary 1048572)
+  (defcanary 1179644)
+
+  (func $print (param $p i32) (param $l i32)
+    (i32.store (i32.const 0) (local.get $p))
+    (i32.store (i32.const 4) (local.get $l))
+    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8))))
+
+  (func (export "_start")
+    (let [$h 0 $g 0]
+      (canaries-arm)
+      ;; Zig hashes its own data; we hash the same words out of our pool
+      (local.set $h (call $fnv1a (call $motto_ptr) (call $motto_len)))
+      (local.set $g (call $fnv1a "the pearl remembers"))
+      (call $jw-init ($out) (i32.const 252) ($wstk) (i32.const 32))
+      (call $jw-map-open)
+      (call $jw-key "motto")
+      (call $jw-str (call $motto_ptr) (call $motto_len))
+      (call $jw-key "fnv")
+      (call $jw-int (local.get $h))
+      (call $jw-key "agree")
+      (call $jw-bool (= (local.get $h) (local.get $g)))
+      (call $jw-key "stamp")
+      (call $jw-int (call $stamp32 (local.get $h) (i32.const 0)))
+      (call $jw-map-close)
+      (canaries-check)
+      (call $print ($out) (jw-len))
+      (call $print "\n"))))

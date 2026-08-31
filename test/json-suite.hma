@@ -1,0 +1,566 @@
+;; json-suite.hma — the JSON libraries under the meter.
+;;
+;;   npx tsx src/cli.ts test/json-suite.hma > suite.wat
+;;   wasmtime suite.wat
+;;
+;; Composition order is the argument: the Clojure accent first, then
+;; the probe machinery, then the instrumented shadows — so everything
+;; after this line, framework and libraries alike, pays coverage on
+;; every branch arm it owns. The suite passes only when every
+;; assertion holds AND every probe fired: 100% or FAIL.
+;;
+;; Memory: framework scratch low, pool from 32, reader state 8192,
+;; writer state 8448, framework state 8704, reader stack 9216, writer
+;; stack 9344, token buffer 9472, recordings 10240/12288, writer
+;; output 14336, coverage bitmap 16384.
+
+(use clj.hma)
+(use cov.hma)
+(use cov-clj.hma)
+
+(module
+  (use glue-test.hma)
+  (use json-read.hma)
+  (use json-write.hma)
+  (use glue-alloc.hma)
+  (use canary.hma)
+
+  ;; bands taken from the allocator, one wearing its own tripwire
+  (take $t-band 64)
+  (take-guarded $t-scratch 60)
+
+  ;; ------------------------------------------------------ helpers
+
+  ;; whole document in one window, default buffers
+  (func $jr-go (param $p i32) (param $l i32)
+    (call $jr-init (i32.const 9472) (i32.const 256) (i32.const 9216) (i32.const 32))
+    (call $jr-fill (local.get $p) (local.get $l)))
+
+  ;; parse feeding chunks of $c bytes, recording each event (and the
+  ;; token behind key/str/num) into $out; returns recording length
+  (func $t-feed (param $p i32) (param $l i32) (param $c i32) (param $out i32) (result i32)
+    (let [$off 0 $w 0 $ev 0 $n 0 $done 0]
+      (call $jr-init (i32.const 9472) (i32.const 256) (i32.const 9216) (i32.const 32))
+      (while (zero? (local.get $done))
+        (local.set $ev (call $jr-next))
+        (when (zero? (local.get $ev))
+          (local.set $ev
+            ($if (< (local.get $off) (local.get $l))
+                 (jr-do!
+                   (local.set $n ($if (< (local.get $c) (- (local.get $l) (local.get $off)))
+                                      (local.get $c)
+                                      (- (local.get $l) (local.get $off))))
+                   (call $jr-fill (+ (local.get $p) (local.get $off)) (local.get $n))
+                   (local.set $off (+ (local.get $off) (local.get $n)))
+                   (i32.const 0))
+                 (call $jr-eof))))
+        (when (not= (local.get $ev) 0)
+          (i32.store8 (+ (local.get $out) (local.get $w)) (local.get $ev))
+          (local.set $w (inc (local.get $w)))
+          (when (or (= (local.get $ev) 5) (= (local.get $ev) 6) (= (local.get $ev) 7))
+            (i32.store8 (+ (local.get $out) (local.get $w)) (jr-tok-len))
+            (local.set $w (inc (local.get $w)))
+            (memory.copy (+ (local.get $out) (local.get $w)) (jr-tok-ptr) (jr-tok-len))
+            (local.set $w (+ (local.get $w) (jr-tok-len))))
+          (when (or (= (local.get $ev) 11) (= (local.get $ev) -1))
+            (local.set $done (i32.const 1)))))
+      (local.get $w)))
+
+  ;; the reader driving the writer: parse $p/$l, emit into the
+  ;; writer's buffer, return the closing event
+  (func $t-pump (param $p i32) (param $l i32) (result i32)
+    (let [$ev 0]
+      (call $jr-go (local.get $p) (local.get $l))
+      (call $jw-init (i32.const 14336) (i32.const 1024) (i32.const 9344) (i32.const 32))
+      (while (and (not= (local.get $ev) 11) (not= (local.get $ev) -1))
+        (local.set $ev (call $jr-next))
+        (when (zero? (local.get $ev))
+          (local.set $ev (call $jr-eof)))
+        (cond (= (local.get $ev) 1) (jr-do! (call $jw-map-open) (i32.const 0))
+              (= (local.get $ev) 2) (jr-do! (call $jw-map-close) (i32.const 0))
+              (= (local.get $ev) 3) (jr-do! (call $jw-arr-open) (i32.const 0))
+              (= (local.get $ev) 4) (jr-do! (call $jw-arr-close) (i32.const 0))
+              (= (local.get $ev) 5) (jr-do! (call $jw-key (jr-tok-ptr) (jr-tok-len)) (i32.const 0))
+              (= (local.get $ev) 6) (jr-do! (call $jw-str (jr-tok-ptr) (jr-tok-len)) (i32.const 0))
+              (= (local.get $ev) 7) (jr-do! (call $jw-num (jr-tok-ptr) (jr-tok-len)) (i32.const 0))
+              (= (local.get $ev) 8) (jr-do! (call $jw-bool (i32.const 1)) (i32.const 0))
+              (= (local.get $ev) 9) (jr-do! (call $jw-bool (i32.const 0)) (i32.const 0))
+              (= (local.get $ev) 10) (jr-do! (call $jw-nil) (i32.const 0))
+              :else 0)
+        (drop))
+      (local.get $ev)))
+
+  ;; expect the next event to be one error with this code
+  (func $t-err (param $code i32)
+    (call $t-is= (call $jr-next) (i32.const -1))
+    (call $t-is= (jr-err) (local.get $code))
+    ;; errors are sticky
+    (call $t-is= (call $jr-next) (i32.const -1))
+    (call $t-is= (call $jr-eof) (i32.const -1)))
+
+  ;; expect end-of-input to be the error (code 9), stickily
+  (func $t-eof-err
+    (call $t-is= (call $jr-eof) (i32.const -1))
+    (call $t-is= (jr-err) (i32.const 9))
+    (call $t-is= (call $jr-next) (i32.const -1))
+    (call $t-is= (call $jr-eof) (i32.const -1)))
+
+  (func $jw-go
+    (call $jw-init (i32.const 14336) (i32.const 1024) (i32.const 9344) (i32.const 32)))
+
+  ;; ------------------------------------------------------- atoms
+
+  (deftest $t-lits "reads the three literals"
+    (call $jr-go "null")
+    (is= (call $jr-next) 10)
+    (is= (call $jr-next) 0)
+    (is= (call $jr-eof) 11)
+    (call $jr-go "true")
+    (is= (call $jr-next) 8)
+    (is= (call $jr-eof) 11)
+    (call $jr-go "false")
+    (is= (call $jr-next) 9)
+    (is= (call $jr-eof) 11))
+
+  (deftest $t-lit-err "a literal must finish spelling itself"
+    (call $jr-go "nul!")
+    (call $t-err (i32.const 1))
+    (call $jr-go "tru")
+    (is= (call $jr-next) 0)
+    (call $t-eof-err))
+
+  (deftest $t-ints "reads integers"
+    (call $jr-go "42")
+    (is= (call $jr-next) 0)
+    (is= (call $jr-eof) 7)
+    (is (jr-int?) "42 is an int")
+    (is= (jr-int) 42)
+    (is-str (jr-tok-ptr) (jr-tok-len) "42")
+    (is= (call $jr-eof) 11)
+    (call $jr-go "-17 ")
+    (is= (call $jr-next) 7)
+    (is= (jr-int) -17)
+    (is= (call $jr-eof) 11)
+    (call $jr-go "0")
+    (is= (call $jr-next) 0)
+    (is= (call $jr-eof) 7)
+    (is= (jr-int) 0)
+    (call $jr-go "-0")
+    (is= (call $jr-next) 0)
+    (is= (call $jr-eof) 7)
+    (is= (jr-int) 0))
+
+  (deftest $t-bigint "ten digits travel as text"
+    (call $jr-go "2147483647")
+    (is= (call $jr-next) 0)
+    (is= (call $jr-eof) 7)
+    (is (not (jr-int?)) "ten digits is spelling, not value")
+    (is-str (jr-tok-ptr) (jr-tok-len) "2147483647")
+    (call $jr-go "123456789")
+    (is= (call $jr-next) 0)
+    (is= (call $jr-eof) 7)
+    (is (jr-int?) "nine digits is a value")
+    (is= (jr-int) 123456789))
+
+  (deftest $t-floats "fractions and exponents travel as text"
+    (call $jr-go "3.14")
+    (is= (call $jr-next) 0)
+    (is= (call $jr-eof) 7)
+    (is (not (jr-int?)))
+    (is-str (jr-tok-ptr) (jr-tok-len) "3.14")
+    (call $jr-go "-0.5e+10")
+    (is= (call $jr-next) 0)
+    (is= (call $jr-eof) 7)
+    (is-str (jr-tok-ptr) (jr-tok-len) "-0.5e+10")
+    (call $jr-go "1E2 ")
+    (is= (call $jr-next) 7)
+    (is-str (jr-tok-ptr) (jr-tok-len) "1E2")
+    (call $jr-go "0.0")
+    (is= (call $jr-next) 0)
+    (is= (call $jr-eof) 7)
+    (is-str (jr-tok-ptr) (jr-tok-len) "0.0")
+    (call $jr-go "0e0")
+    (is= (call $jr-next) 0)
+    (is= (call $jr-eof) 7)
+    (is-str (jr-tok-ptr) (jr-tok-len) "0e0")
+    (call $jr-go "7e-2")
+    (is= (call $jr-next) 0)
+    (is= (call $jr-eof) 7)
+    (is-str (jr-tok-ptr) (jr-tok-len) "7e-2")
+    (call $jr-go "1.5E2 ")
+    (is= (call $jr-next) 7)
+    (is-str (jr-tok-ptr) (jr-tok-len) "1.5E2")
+    (call $jr-go "1.25 ")
+    (is= (call $jr-next) 7)
+    (is-str (jr-tok-ptr) (jr-tok-len) "1.25")
+    (call $jr-go "0 ")
+    (is= (call $jr-next) 7)
+    (is-str (jr-tok-ptr) (jr-tok-len) "0"))
+
+  (deftest $t-num-errs "rejects malformed numbers"
+    (call $jr-go "-")
+    (is= (call $jr-next) 0)
+    (call $t-eof-err)
+    (call $jr-go "-x")
+    (call $t-err (i32.const 6))
+    (call $jr-go "01")
+    (call $t-err (i32.const 6))
+    (call $jr-go "0x1")
+    (call $t-err (i32.const 6))
+    (call $jr-go "1.")
+    (is= (call $jr-next) 0)
+    (call $t-eof-err)
+    (call $jr-go "1.x")
+    (call $t-err (i32.const 6))
+    (call $jr-go "1ex")
+    (call $t-err (i32.const 6))
+    (call $jr-go "1e+")
+    (is= (call $jr-next) 0)
+    (call $t-eof-err)
+    (call $jr-go "1e+x")
+    (call $t-err (i32.const 6))
+    (call $jr-go "1x")
+    (call $t-err (i32.const 6))
+    (call $jr-go "1e5x")
+    (call $t-err (i32.const 6))
+    (call $jr-go "1.5x")
+    (call $t-err (i32.const 6))
+    (call $jr-go ".5")
+    (call $t-err (i32.const 1))
+    (call $jr-go "+1")
+    (call $t-err (i32.const 1)))
+
+  ;; ------------------------------------------------------ strings
+
+  (deftest $t-strs "reads strings"
+    (call $jr-go "\"\"")
+    (is= (call $jr-next) 6)
+    (is= (jr-tok-len) 0)
+    (is= (call $jr-eof) 11)
+    (call $jr-go "\"glue\"")
+    (is= (call $jr-next) 6)
+    (is-str (jr-tok-ptr) (jr-tok-len) "glue"))
+
+  (deftest $t-escapes "unwinds every named escape"
+    (call $jr-go "\"a\\\"b\\\\c\\/d\\ne\\tf\"")
+    (is= (call $jr-next) 6)
+    (is-str (jr-tok-ptr) (jr-tok-len) "a\"b\\c/d\ne\tf")
+    ;; \b \f \r decode to bytes no literal here can spell
+    (call $jr-go "\"\\b\\f\\r\"")
+    (is= (call $jr-next) 6)
+    (is= (jr-tok-len) 3)
+    (is= (i32.load8_u (jr-tok-ptr)) 8)
+    (is= (i32.load8_u (+ (jr-tok-ptr) 1)) 12)
+    (is= (i32.load8_u (+ (jr-tok-ptr) 2)) 13))
+
+  (deftest $t-unicode "mints UTF-8 from \\u"
+    (call $jr-go "\"\\u0041\"")
+    (is= (call $jr-next) 6)
+    (is-str (jr-tok-ptr) (jr-tok-len) "A")
+    (call $jr-go "\"\\u00e9\"")
+    (is= (call $jr-next) 6)
+    (is-str (jr-tok-ptr) (jr-tok-len) "é")
+    (call $jr-go "\"\\u20aC\"")
+    (is= (call $jr-next) 6)
+    (is-str (jr-tok-ptr) (jr-tok-len) "€")
+    (call $jr-go "\"\\uD83D\\ude00\"")
+    (is= (call $jr-next) 6)
+    (is-str (jr-tok-ptr) (jr-tok-len) "😀")
+    (call $jr-go "\"é€😀\"")
+    (is= (call $jr-next) 6)
+    (is-str (jr-tok-ptr) (jr-tok-len) "é€😀"))
+
+  (deftest $t-str-errs "rejects broken strings"
+    (call $jr-go "\"\\q\"")
+    (call $t-err (i32.const 2))
+    (call $jr-go "\"\\u00gz\"")
+    (call $t-err (i32.const 3))
+    (call $jr-go "\"\\u00!z\"")
+    (call $t-err (i32.const 3))
+    (call $jr-go "\"\n\"")
+    (call $t-err (i32.const 5))
+    (call $jr-go "\"open")
+    (is= (call $jr-next) 0)
+    (call $t-eof-err)
+    (call $jr-go "\"esc\\")
+    (is= (call $jr-next) 0)
+    (call $t-eof-err))
+
+  (deftest $t-sur-errs "rejects surrogate debris"
+    (call $jr-go "\"\\uD83Dx\"")
+    (call $t-err (i32.const 4))
+    (call $jr-go "\"\\uD83D\\n\"")
+    (call $t-err (i32.const 4))
+    (call $jr-go "\"\\uD83D\\u0041\"")
+    (call $t-err (i32.const 4))
+    (call $jr-go "\"\\uDE00\"")
+    (call $t-err (i32.const 4)))
+
+  (deftest $t-tok-cap "the token buffer polices its cap"
+    (call $jr-init (i32.const 9472) (i32.const 4) (i32.const 9216) (i32.const 32))
+    (call $jr-fill "\"12345\"")
+    (call $t-err (i32.const 7)))
+
+  ;; --------------------------------------------------- structures
+
+  (deftest $t-empty "reads empty containers"
+    (call $jr-go "{}")
+    (is= (call $jr-next) 1)
+    (is= (call $jr-next) 2)
+    (is= (call $jr-eof) 11)
+    (call $jr-go "[]")
+    (is= (call $jr-next) 3)
+    (is= (call $jr-next) 4)
+    (is= (call $jr-eof) 11))
+
+  (deftest $t-nested "walks a nested document"
+    (call $jr-go " { \"a\" : [ 1 , { \"b\" : null } ] , \"c\" : \"d\" } ")
+    (is= (call $jr-next) 1)
+    (is= (call $jr-next) 5)
+    (is-str (jr-tok-ptr) (jr-tok-len) "a")
+    (is= (call $jr-next) 3)
+    (is= (call $jr-next) 7)
+    (is= (jr-int) 1)
+    (is= (jr-depth) 2)
+    (is= (call $jr-next) 1)
+    (is= (call $jr-next) 5)
+    (is-str (jr-tok-ptr) (jr-tok-len) "b")
+    (is= (call $jr-next) 10)
+    (is= (call $jr-next) 2)
+    (is= (call $jr-next) 4)
+    (is= (call $jr-next) 5)
+    (is-str (jr-tok-ptr) (jr-tok-len) "c")
+    (is= (call $jr-next) 6)
+    (is-str (jr-tok-ptr) (jr-tok-len) "d")
+    (is= (call $jr-next) 2)
+    (is= (call $jr-eof) 11))
+
+  (deftest $t-struct-errs "rejects structural nonsense"
+    (call $jr-go "{1}")
+    (is= (call $jr-next) 1)
+    (call $t-err (i32.const 1))
+    (call $jr-go "{\"a\" 1}")
+    (is= (call $jr-next) 1)
+    (is= (call $jr-next) 5)
+    (call $t-err (i32.const 1))
+    (call $jr-go "{\"a\":1,}")
+    (is= (call $jr-next) 1)
+    (is= (call $jr-next) 5)
+    (is= (call $jr-next) 7)
+    (call $t-err (i32.const 1))
+    (call $jr-go "{\"a\":1 \"b\":2}")
+    (is= (call $jr-next) 1)
+    (is= (call $jr-next) 5)
+    (is= (call $jr-next) 7)
+    (call $t-err (i32.const 1))
+    (call $jr-go "[1,]")
+    (is= (call $jr-next) 3)
+    (is= (call $jr-next) 7)
+    (call $t-err (i32.const 1))
+    (call $jr-go "[,1]")
+    (is= (call $jr-next) 3)
+    (call $t-err (i32.const 1))
+    (call $jr-go "[1}")
+    (is= (call $jr-next) 3)
+    (is= (call $jr-next) 7)
+    (call $t-err (i32.const 1))
+    (call $jr-go "{\"a\":1]")
+    (is= (call $jr-next) 1)
+    (is= (call $jr-next) 5)
+    (is= (call $jr-next) 7)
+    (call $t-err (i32.const 1))
+    (call $jr-go "]")
+    (call $t-err (i32.const 1))
+    (call $jr-go "1 2")
+    (is= (call $jr-next) 7)
+    (call $t-err (i32.const 1))
+    (call $jr-go "[1 ,2] x")
+    (is= (call $jr-next) 3)
+    (is= (call $jr-next) 7)
+    (is= (call $jr-next) 7)
+    (is= (call $jr-next) 4)
+    (call $t-err (i32.const 1))
+    (call $jr-go "")
+    (is= (call $jr-next) 0)
+    (call $t-eof-err)
+    ;; whitespace only, carriage return included (no literal spells CR)
+    (i32.store8 (i32.const 9600) (i32.const 32))
+    (i32.store8 (i32.const 9601) (i32.const 10))
+    (i32.store8 (i32.const 9602) (i32.const 9))
+    (i32.store8 (i32.const 9603) (i32.const 13))
+    (call $jr-init (i32.const 9472) (i32.const 256) (i32.const 9216) (i32.const 32))
+    (call $jr-fill (i32.const 9600) (i32.const 4))
+    (is= (call $jr-next) 0)
+    (call $t-eof-err)
+    (call $jr-go "[")
+    (is= (call $jr-next) 3)
+    (is= (call $jr-next) 0)
+    (call $t-eof-err)
+    (call $jr-go "{\"a\"")
+    (is= (call $jr-next) 1)
+    (is= (call $jr-next) 5)
+    (is= (call $jr-next) 0)
+    (call $t-eof-err))
+
+  (deftest $t-deep "the stack polices its depth"
+    (call $jr-init (i32.const 9472) (i32.const 256) (i32.const 9216) (i32.const 2))
+    (call $jr-fill "[[[")
+    (is= (call $jr-next) 3)
+    (is= (call $jr-next) 3)
+    (call $t-err (i32.const 8)))
+
+  ;; ---------------------------------------------------- streaming
+
+  (deftest $t-chunks "any chunking tells the same story"
+    (let [$doc 0 $len 0 $a 0 $b 0]
+      ;; the kitchen sink: every event, every escape family, both
+      ;; container kinds, floats, and a spanning token or two
+      (call $t-doc)
+      (local.set $doc (i32.const 10240))
+      (local.set $len (call $t-feed (i32.load (i32.const 10236)) (i32.load (i32.const 10232)) (i32.const 4096) (local.get $doc)))
+      (is (pos? (local.get $len)) "the whole-window recording exists")
+      (local.set $a (local.get $len))
+      (local.set $b (call $t-feed (i32.load (i32.const 10236)) (i32.load (i32.const 10232)) (i32.const 1) (i32.const 12288)))
+      (is-str (local.get $doc) (local.get $a) (i32.const 12288) (local.get $b))
+      (local.set $b (call $t-feed (i32.load (i32.const 10236)) (i32.load (i32.const 10232)) (i32.const 3) (i32.const 12288)))
+      (is-str (local.get $doc) (local.get $a) (i32.const 12288) (local.get $b))
+      (local.set $b (call $t-feed (i32.load (i32.const 10236)) (i32.load (i32.const 10232)) (i32.const 7) (i32.const 12288)))
+      (is-str (local.get $doc) (local.get $a) (i32.const 12288) (local.get $b))))
+
+  ;; stash the kitchen sink's pool address: a literal lowers to
+  ;; ptr+len at its use site, so park them once
+  (func $t-doc
+    (call $t-doc2 "{\"k\":[1,-2.5e+3,\"a\\u00e9\\uD83D\\uDE00 b\",true,false,null,{},[]],\"n\":9,\"s\":\"\\\"\\\\\"}"))
+  (func $t-doc2 (param $p i32) (param $l i32)
+    (i32.store (i32.const 10236) (local.get $p))
+    (i32.store (i32.const 10232) (local.get $l)))
+
+  (deftest $t-more "a starved reader asks for more"
+    (call $jr-init (i32.const 9472) (i32.const 256) (i32.const 9216) (i32.const 32))
+    (is= (call $jr-next) 0)
+    (call $jr-fill "tr")
+    (is= (call $jr-next) 0)
+    (call $jr-fill "ue")
+    (is= (call $jr-next) 8)
+    (is= (call $jr-eof) 11))
+
+  ;; ------------------------------------------------------- writer
+
+  (deftest $t-wr-atoms "writes atoms"
+    (call $jw-go)
+    (call $jw-bool (i32.const 1))
+    (is-str (jw-buf) (jw-len) "true")
+    (call $jw-go)
+    (call $jw-bool (i32.const 0))
+    (is-str (jw-buf) (jw-len) "false")
+    (call $jw-go)
+    (call $jw-nil)
+    (is-str (jw-buf) (jw-len) "null")
+    (is (zero? (jw-err))))
+
+  (deftest $t-wr-ints "writes any i32"
+    (call $jw-go)
+    (call $jw-int (i32.const 0))
+    (is-str (jw-buf) (jw-len) "0")
+    (call $jw-go)
+    (call $jw-int (i32.const 7))
+    (is-str (jw-buf) (jw-len) "7")
+    (call $jw-go)
+    (call $jw-int (i32.const -7))
+    (is-str (jw-buf) (jw-len) "-7")
+    (call $jw-go)
+    (call $jw-int (i32.const 100))
+    (is-str (jw-buf) (jw-len) "100")
+    (call $jw-go)
+    (call $jw-int (i32.const 2147483647))
+    (is-str (jw-buf) (jw-len) "2147483647")
+    (call $jw-go)
+    (call $jw-int (i32.const -2147483648))
+    (is-str (jw-buf) (jw-len) "-2147483648"))
+
+  (deftest $t-wr-strs "escapes on the way out"
+    (call $jw-go)
+    (call $jw-str "plain é")
+    (is-str (jw-buf) (jw-len) "\"plain é\"")
+    (call $jw-go)
+    (call $jw-str "q\" b\\ \n \t")
+    (is-str (jw-buf) (jw-len) "\"q\\\" b\\\\ \\n \\t\"")
+    (call $jw-go)
+    (call $t-wr-ctl)
+    (is-str (jw-buf) (jw-len) "\"\\b\\f\\r\\u0001\\u001f\""))
+  ;; five bytes no literal here can spell
+  (func $t-wr-ctl
+    (i32.store8 (i32.const 9600) (i32.const 8))
+    (i32.store8 (i32.const 9601) (i32.const 12))
+    (i32.store8 (i32.const 9602) (i32.const 13))
+    (i32.store8 (i32.const 9603) (i32.const 1))
+    (i32.store8 (i32.const 9604) (i32.const 31))
+    (call $jw-str (i32.const 9600) (i32.const 5)))
+
+  (deftest $t-wr-nest "commas place themselves"
+    (call $jw-go)
+    (call $jw-map-open)
+    (call $jw-key "a")
+    (call $jw-arr-open)
+    (call $jw-int (i32.const 1))
+    (call $jw-int (i32.const 2))
+    (call $jw-map-open)
+    (call $jw-map-close)
+    (call $jw-arr-close)
+    (call $jw-key "b")
+    (call $jw-str "x")
+    (call $jw-key "c")
+    (call $jw-num "6.02e23")
+    (call $jw-map-close)
+    (is-str (jw-buf) (jw-len) "{\"a\":[1,2,{}],\"b\":\"x\",\"c\":6.02e23}")
+    (is (zero? (jw-err))))
+
+  (deftest $t-wr-caps "the writer polices its resources"
+    (call $jw-init (i32.const 14336) (i32.const 3) (i32.const 9344) (i32.const 32))
+    (call $jw-str "long")
+    (is= (jw-err) 1)
+    (call $jw-init (i32.const 14336) (i32.const 1024) (i32.const 9344) (i32.const 1))
+    (call $jw-arr-open)
+    (call $jw-arr-open)
+    (is= (jw-err) 2))
+
+  ;; ---------------------------------------------------- round trip
+
+  (deftest $t-round "reader and writer agree on the kitchen sink"
+    (call $t-doc)
+    (is= (call $t-pump (i32.load (i32.const 10236)) (i32.load (i32.const 10232))) 11)
+    (is-str (jw-buf) (jw-len)
+      "{\"k\":[1,-2.5e+3,\"aé😀 b\",true,false,null,{},[]],\"n\":9,\"s\":\"\\\"\\\\\"}")
+    (is (zero? (jw-err))))
+
+  ;; ---------------------------------------------- framework, meta
+
+  (deftest $t-frame "the framework reports its own failures"
+    (is-fail (is 0))
+    (is-fail (is 0 "meant to fail"))
+    (is-fail (is= -5 123))
+    (is-fail (is= 0 456789))
+    (is-fail (is-str "abc" "abd"))
+    (is-fail (is-str "abc" "ab"))
+    (is-fail (is-fail (is 1))))
+
+  (deftest $t-alloc "bands are taken, borders armed"
+    (is= ($t-band) 65536)
+    (is= ($t-scratch) 65600)
+    (is= (taken) 65664)
+    (canaries-arm)
+    ;; fill the guarded band to its brim — the sentinel survives
+    (memory.fill ($t-scratch) (i32.const 7) (i32.const 60))
+    (canaries-check)
+    (is= (i32.load (+ ($t-scratch) 56)) 117901063))
+
+  (deftest $t-xfail "an expected FAIL is absorbed"
+    (expect-fail)
+    (is 0))
+
+  ;; ------------------------------------------------------ verdict
+
+  (func (export "_start")
+    (run-tests)
+    (cov-report)
+    (if (call $t-sum?) (then (call $proc_exit (i32.const 1))))))

@@ -1,0 +1,27 @@
+;; glue-mem.hma — the memory map of the glue libraries, in one place.
+;;
+;; Every library that owns a block of state names its base here and
+;; nowhere else. A host with its own memory map ships its own copy of
+;; this file: (use …) resolves names against the program's directory
+;; before the toolchain's, and splices once per name, so the copy that
+;; loads first wins and the libraries follow it wherever it points.
+;;
+;; The map, as shipped:
+;;
+;;   0    .. 31     scratch — iovec, nwritten, digit buffer (toolchain
+;;                  convention; the lowerer pools strings from 32 up)
+;;   32   .. …      the interned string pool, as large as the program
+;;   8192 .. 8275   json-read.hma state
+;;   8448 .. 8479   json-write.hma state
+;;   8704 .. 8739   glue-test.hma state
+;;   16384..20479   cov.hma bitmap, one byte per probe
+;;
+;; Token buffers, container stacks, and output buffers are the
+;; caller's to place — they arrive through each library's init.
+;; A base is an (i32.const …): address arithmetic on top of it folds
+;; in the engine, not in the text.
+
+(defmacro jr-base () `(i32.const 8192))
+(defmacro jw-base () `(i32.const 8448))
+(defmacro t-base () `(i32.const 8704))
+(defmacro cov-base () `(i32.const 16384))

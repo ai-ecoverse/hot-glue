@@ -1,0 +1,447 @@
+;; json-read.hma — a streaming JSON reader.
+;;
+;; A pull parser over a window of bytes the caller lends it: point it
+;; at a chunk with $jr-fill, ask $jr-next for the next event, and when
+;; it answers (ev-more) lend it the next chunk; $jr-eof closes the
+;; stream. Structural bytes are never copied — only string and number
+;; tokens pass through the token buffer, so a gigabyte of JSON parses
+;; in a few hundred bytes of state. The container stack is one bit per
+;; level: 1 for a map, 0 for an array.
+;;
+;; Events: 0 more (window empty — lend another chunk), 1 map-open,
+;; 2 map-close, 3 arr-open, 4 arr-close, 5 key, 6 str, 7 num, 8 true,
+;; 9 false, 10 nil, 11 eof, -1 err. After key/str the decoded bytes
+;; sit at (jr-tok-ptr)/(jr-tok-len); after num the raw spelling sits
+;; there too, with (jr-int) the signed value whenever (jr-int?) says
+;; the token was an integer of nine or fewer digits — wider or
+;; fractional numbers travel as text, and the caller (or f64 code, or
+;; a writer echoing them verbatim) decides what they mean.
+;;
+;; Strings arrive decoded: escapes unwound, \uXXXX minted as UTF-8,
+;; surrogate pairs fused; raw bytes above 0x1f pass through untouched.
+;; Errors are sticky and enumerated: 1 char, 2 esc, 3 hex, 4 sur,
+;; 5 ctl, 6 num, 7 tok (token buffer full), 8 deep (stack full),
+;; 9 eof (input ended mid-value).
+;;
+;; State block at (jr-base) — 8192 by glue-mem.hma; a host with its
+;; own memory map shadows that one file to move every base at once.
+;; The caller places the token buffer and the stack bitset through
+;; $jr-init. Nothing here allocates.
+
+(use clj.hma)
+(use glue-mem.hma)
+
+(defmacro jr-do! (&rest xs) `(splice ,@xs))
+
+(defmacro ev-more () `(i32.const 0))
+(defmacro ev-map-open () `(i32.const 1))
+(defmacro ev-map-close () `(i32.const 2))
+(defmacro ev-arr-open () `(i32.const 3))
+(defmacro ev-arr-close () `(i32.const 4))
+(defmacro ev-key () `(i32.const 5))
+(defmacro ev-str () `(i32.const 6))
+(defmacro ev-num () `(i32.const 7))
+(defmacro ev-true () `(i32.const 8))
+(defmacro ev-false () `(i32.const 9))
+(defmacro ev-nil () `(i32.const 10))
+(defmacro ev-eof () `(i32.const 11))
+(defmacro ev-err () `(i32.const -1))
+
+(defmacro jr-st () `(i32.load (jr-base)))
+(defmacro jr-st! (x) `(i32.store (jr-base) ,x))
+(defmacro jr-in () `(i32.load (i32.add (jr-base) (i32.const 4))))
+(defmacro jr-in! (x) `(i32.store (i32.add (jr-base) (i32.const 4)) ,x))
+(defmacro jr-end () `(i32.load (i32.add (jr-base) (i32.const 8))))
+(defmacro jr-end! (x) `(i32.store (i32.add (jr-base) (i32.const 8)) ,x))
+(defmacro jr-depth () `(i32.load (i32.add (jr-base) (i32.const 12))))
+(defmacro jr-depth! (x) `(i32.store (i32.add (jr-base) (i32.const 12)) ,x))
+(defmacro jr-tok-ptr () `(i32.load (i32.add (jr-base) (i32.const 16))))
+(defmacro jr-tok-ptr! (x) `(i32.store (i32.add (jr-base) (i32.const 16)) ,x))
+(defmacro jr-tok-cap () `(i32.load (i32.add (jr-base) (i32.const 20))))
+(defmacro jr-tok-cap! (x) `(i32.store (i32.add (jr-base) (i32.const 20)) ,x))
+(defmacro jr-tok-len () `(i32.load (i32.add (jr-base) (i32.const 24))))
+(defmacro jr-tok-len! (x) `(i32.store (i32.add (jr-base) (i32.const 24)) ,x))
+(defmacro jr-stk () `(i32.load (i32.add (jr-base) (i32.const 28))))
+(defmacro jr-stk! (x) `(i32.store (i32.add (jr-base) (i32.const 28)) ,x))
+(defmacro jr-stk-cap () `(i32.load (i32.add (jr-base) (i32.const 32))))
+(defmacro jr-stk-cap! (x) `(i32.store (i32.add (jr-base) (i32.const 32)) ,x))
+(defmacro jr-int () `(i32.load (i32.add (jr-base) (i32.const 36))))
+(defmacro jr-int! (x) `(i32.store (i32.add (jr-base) (i32.const 36)) ,x))
+(defmacro jr-neg () `(i32.load (i32.add (jr-base) (i32.const 40))))
+(defmacro jr-neg! (x) `(i32.store (i32.add (jr-base) (i32.const 40)) ,x))
+(defmacro jr-int? () `(i32.load (i32.add (jr-base) (i32.const 44))))
+(defmacro jr-int?! (x) `(i32.store (i32.add (jr-base) (i32.const 44)) ,x))
+(defmacro jr-u () `(i32.load (i32.add (jr-base) (i32.const 48))))
+(defmacro jr-u! (x) `(i32.store (i32.add (jr-base) (i32.const 48)) ,x))
+(defmacro jr-ucnt () `(i32.load (i32.add (jr-base) (i32.const 52))))
+(defmacro jr-ucnt! (x) `(i32.store (i32.add (jr-base) (i32.const 52)) ,x))
+(defmacro jr-hi () `(i32.load (i32.add (jr-base) (i32.const 56))))
+(defmacro jr-hi! (x) `(i32.store (i32.add (jr-base) (i32.const 56)) ,x))
+(defmacro jr-key? () `(i32.load (i32.add (jr-base) (i32.const 60))))
+(defmacro jr-key?! (x) `(i32.store (i32.add (jr-base) (i32.const 60)) ,x))
+(defmacro jr-err () `(i32.load (i32.add (jr-base) (i32.const 64))))
+(defmacro jr-err! (x) `(i32.store (i32.add (jr-base) (i32.const 64)) ,x))
+(defmacro jr-lit-ptr () `(i32.load (i32.add (jr-base) (i32.const 68))))
+(defmacro jr-lit-ptr! (x) `(i32.store (i32.add (jr-base) (i32.const 68)) ,x))
+(defmacro jr-lit-len () `(i32.load (i32.add (jr-base) (i32.const 72))))
+(defmacro jr-lit-len! (x) `(i32.store (i32.add (jr-base) (i32.const 72)) ,x))
+(defmacro jr-lit-i () `(i32.load (i32.add (jr-base) (i32.const 76))))
+(defmacro jr-lit-i! (x) `(i32.store (i32.add (jr-base) (i32.const 76)) ,x))
+(defmacro jr-lit-ev () `(i32.load (i32.add (jr-base) (i32.const 80))))
+(defmacro jr-lit-ev! (x) `(i32.store (i32.add (jr-base) (i32.const 80)) ,x))
+
+;; ------------------------------------------------------- lifecycle
+
+(func $jr-init (param $tp i32) (param $tc i32) (param $sp i32) (param $sc i32)
+  (jr-st! (i32.const 0))
+  (jr-depth! (i32.const 0))
+  (jr-tok-ptr! (local.get $tp))
+  (jr-tok-cap! (local.get $tc))
+  (jr-tok-len! (i32.const 0))
+  (jr-stk! (local.get $sp))
+  (jr-stk-cap! (local.get $sc))
+  (jr-hi! (i32.const 0))
+  (jr-err! (i32.const 0))
+  (jr-in! (i32.const 0))
+  (jr-end! (i32.const 0)))
+
+(func $jr-fill (param $p i32) (param $l i32)
+  (jr-in! (local.get $p))
+  (jr-end! (+ (local.get $p) (local.get $l))))
+
+(func $jr-fail (param $c i32) (result i32)
+  (jr-st! (i32.const 20))
+  (jr-err! (local.get $c))
+  (ev-err))
+
+;; --------------------------------------------------------- classes
+
+(func $jr-ws? (param $b i32) (result i32)
+  (or (= (local.get $b) 32) (= (local.get $b) 9)
+      (= (local.get $b) 10) (= (local.get $b) 13)))
+
+(func $jr-digit? (param $b i32) (result i32)
+  (and (>= (local.get $b) 48) (<= (local.get $b) 57)))
+
+;; hex digit value, or -1
+(func $jr-hexv (param $b i32) (result i32)
+  (cond (call $jr-digit? (local.get $b)) (- (local.get $b) 48)
+        (and (>= (local.get $b) 97) (<= (local.get $b) 102)) (- (local.get $b) 87)
+        (and (>= (local.get $b) 65) (<= (local.get $b) 70)) (- (local.get $b) 55)
+        :else -1))
+
+;; a byte that ends a number
+(func $jr-delim? (param $b i32) (result i32)
+  (or (call $jr-ws? (local.get $b))
+      (= (local.get $b) 44) (= (local.get $b) 93) (= (local.get $b) 125)))
+
+;; ----------------------------------------------------- token buffer
+
+(func $jr-put (param $b i32) (result i32)
+  (when (= (jr-tok-len) (jr-tok-cap))
+    (return (call $jr-fail (i32.const 7))))
+  (i32.store8 (+ (jr-tok-ptr) (jr-tok-len)) (local.get $b))
+  (jr-tok-len! (inc (jr-tok-len)))
+  (i32.const 0))
+
+;; ----------------------------------------------------------- stack
+
+(func $jr-push (param $obj i32) (result i32)
+  (let [$byte (+ (jr-stk) (quot (jr-depth) 8))
+        $bit (bit-shift-left 1 (rem (jr-depth) 8))]
+    (when (= (jr-depth) (jr-stk-cap))
+      (return (call $jr-fail (i32.const 8))))
+    ($if (local.get $obj)
+         (jr-do! (i32.store8 (local.get $byte)
+                   (bit-or (i32.load8_u (local.get $byte)) (local.get $bit))) (i32.const 0))
+         (jr-do! (i32.store8 (local.get $byte)
+                   (bit-and (i32.load8_u (local.get $byte)) (bit-xor (local.get $bit) -1))) (i32.const 0)))
+    (drop)
+    (jr-depth! (inc (jr-depth)))
+    (i32.const 0)))
+
+(func $jr-top (result i32)
+  (not (zero? (bit-and (i32.load8_u (+ (jr-stk) (quot (dec (jr-depth)) 8)))
+                       (bit-shift-left 1 (rem (dec (jr-depth)) 8))))))
+
+(func $jr-open (param $obj i32) (param $st i32) (param $ev i32) (result i32)
+  (when (neg? (call $jr-push (local.get $obj)))
+    (return (ev-err)))
+  (jr-st! (local.get $st))
+  (local.get $ev))
+
+(func $jr-close (param $obj i32) (param $ev i32) (result i32)
+  (when (not= (call $jr-top) (local.get $obj))
+    (return (call $jr-fail (i32.const 1))))
+  (jr-depth! (dec (jr-depth)))
+  (jr-st! (i32.const 2))
+  (local.get $ev))
+
+;; ---------------------------------------------------------- values
+
+(func $jr-str-begin (param $key i32) (result i32)
+  (jr-tok-len! (i32.const 0))
+  (jr-key?! (local.get $key))
+  (jr-st! (i32.const 6))
+  (i32.const 0))
+
+(func $jr-num-begin (param $b i32) (result i32)
+  (jr-tok-len! (i32.const 0))
+  (jr-neg! (= (local.get $b) 45))
+  (jr-int?! (i32.const 1))
+  (jr-int! (- (local.get $b) 48))
+  (cond (= (local.get $b) 45) (jr-do! (jr-st! (i32.const 11)) (jr-int! (i32.const 0)) (i32.const 0))
+        (= (local.get $b) 48) (jr-do! (jr-st! (i32.const 12)) (i32.const 0))
+        :else (jr-do! (jr-st! (i32.const 13)) (i32.const 0)))
+  (drop)
+  (call $jr-put (local.get $b)))
+
+(func $jr-lit-begin (param $p i32) (param $n i32) (param $ev i32) (result i32)
+  (jr-lit-ptr! (local.get $p))
+  (jr-lit-len! (local.get $n))
+  (jr-lit-i! (i32.const 0))
+  (jr-lit-ev! (local.get $ev))
+  (jr-st! (i32.const 19))
+  (i32.const 0))
+
+(func $jr-value (param $b i32) (result i32)
+  (cond (call $jr-ws? (local.get $b)) 0
+        (= (local.get $b) 123) (call $jr-open (i32.const 1) (i32.const 3) (ev-map-open))
+        (= (local.get $b) 91) (call $jr-open (i32.const 0) (i32.const 1) (ev-arr-open))
+        (= (local.get $b) 34) (call $jr-str-begin (i32.const 0))
+        (or (= (local.get $b) 45) (call $jr-digit? (local.get $b)))
+          (call $jr-num-begin (local.get $b))
+        (= (local.get $b) 116) (call $jr-lit-begin "rue" (ev-true))
+        (= (local.get $b) 102) (call $jr-lit-begin "alse" (ev-false))
+        (= (local.get $b) 110) (call $jr-lit-begin "ull" (ev-nil))
+        :else (call $jr-fail (i32.const 1))))
+
+(func $jr-comma (result i32)
+  (jr-st! ($if (call $jr-top) 4 0))
+  (i32.const 0))
+
+(func $jr-after (param $b i32) (result i32)
+  (cond (call $jr-ws? (local.get $b)) 0
+        (zero? (jr-depth)) (call $jr-fail (i32.const 1))
+        (= (local.get $b) 44) (call $jr-comma)
+        (= (local.get $b) 125) (call $jr-close (i32.const 1) (ev-map-close))
+        (= (local.get $b) 93) (call $jr-close (i32.const 0) (ev-arr-close))
+        :else (call $jr-fail (i32.const 1))))
+
+(func $jr-keyoc (param $b i32) (result i32)
+  (cond (call $jr-ws? (local.get $b)) 0
+        (= (local.get $b) 34) (call $jr-str-begin (i32.const 1))
+        (= (local.get $b) 125) (call $jr-close (i32.const 1) (ev-map-close))
+        :else (call $jr-fail (i32.const 1))))
+
+(func $jr-key (param $b i32) (result i32)
+  (cond (call $jr-ws? (local.get $b)) 0
+        (= (local.get $b) 34) (call $jr-str-begin (i32.const 1))
+        :else (call $jr-fail (i32.const 1))))
+
+(func $jr-colon (param $b i32) (result i32)
+  (cond (call $jr-ws? (local.get $b)) 0
+        (= (local.get $b) 58) (jr-do! (jr-st! (i32.const 0)) (i32.const 0))
+        :else (call $jr-fail (i32.const 1))))
+
+;; ---------------------------------------------------------- strings
+
+(func $jr-str-end (result i32)
+  ($if (jr-key?)
+       (jr-do! (jr-st! (i32.const 5)) (ev-key))
+       (jr-do! (jr-st! (i32.const 2)) (ev-str))))
+
+(func $jr-string (param $b i32) (result i32)
+  (cond (= (local.get $b) 34) (call $jr-str-end)
+        (= (local.get $b) 92) (jr-do! (jr-st! (i32.const 7)) (i32.const 0))
+        (< (local.get $b) 32) (call $jr-fail (i32.const 5))
+        :else (call $jr-put (local.get $b))))
+
+(func $jr-escape (param $b i32) (result i32)
+  (jr-st! (i32.const 6))
+  (cond (or (= (local.get $b) 34) (= (local.get $b) 92) (= (local.get $b) 47))
+          (call $jr-put (local.get $b))
+        (= (local.get $b) 98) (call $jr-put (i32.const 8))
+        (= (local.get $b) 102) (call $jr-put (i32.const 12))
+        (= (local.get $b) 110) (call $jr-put (i32.const 10))
+        (= (local.get $b) 114) (call $jr-put (i32.const 13))
+        (= (local.get $b) 116) (call $jr-put (i32.const 9))
+        (= (local.get $b) 117)
+          (jr-do! (jr-u! (i32.const 0)) (jr-ucnt! (i32.const 0)) (jr-st! (i32.const 8)) (i32.const 0))
+        :else (call $jr-fail (i32.const 2))))
+
+(func $jr-utf8 (param $cp i32) (result i32)
+  (cond (< (local.get $cp) 128) (call $jr-put (local.get $cp))
+        (< (local.get $cp) 2048)
+          (jr-do!
+            (drop (call $jr-put (bit-or 192 (unsigned-bit-shift-right (local.get $cp) 6))))
+            (call $jr-put (bit-or 128 (bit-and (local.get $cp) 63))))
+        (< (local.get $cp) 65536)
+          (jr-do!
+            (drop (call $jr-put (bit-or 224 (unsigned-bit-shift-right (local.get $cp) 12))))
+            (drop (call $jr-put (bit-or 128 (bit-and (unsigned-bit-shift-right (local.get $cp) 6) 63))))
+            (call $jr-put (bit-or 128 (bit-and (local.get $cp) 63))))
+        :else
+          (jr-do!
+            (drop (call $jr-put (bit-or 240 (unsigned-bit-shift-right (local.get $cp) 18))))
+            (drop (call $jr-put (bit-or 128 (bit-and (unsigned-bit-shift-right (local.get $cp) 12) 63))))
+            (drop (call $jr-put (bit-or 128 (bit-and (unsigned-bit-shift-right (local.get $cp) 6) 63))))
+            (call $jr-put (bit-or 128 (bit-and (local.get $cp) 63))))))
+
+(func $jr-u-done (result i32)
+  (cond (jr-hi)
+          (cond (and (>= (jr-u) 56320) (<= (jr-u) 57343))
+                  (jr-do!
+                    (jr-u! (+ 65536
+                              (bit-shift-left (- (jr-hi) 55296) 10)
+                              (- (jr-u) 56320)))
+                    (jr-hi! (i32.const 0))
+                    (jr-st! (i32.const 6))
+                    (call $jr-utf8 (jr-u)))
+                :else (call $jr-fail (i32.const 4)))
+        (and (>= (jr-u) 55296) (<= (jr-u) 56319))
+          (jr-do! (jr-hi! (jr-u)) (jr-st! (i32.const 9)) (i32.const 0))
+        (and (>= (jr-u) 56320) (<= (jr-u) 57343)) (call $jr-fail (i32.const 4))
+        :else (jr-do! (jr-st! (i32.const 6)) (call $jr-utf8 (jr-u)))))
+
+(func $jr-hex4 (param $b i32) (result i32)
+  (let [$v (call $jr-hexv (local.get $b))]
+    (when (neg? (local.get $v))
+      (return (call $jr-fail (i32.const 3))))
+    (jr-u! (+ (* (jr-u) 16) (local.get $v)))
+    (jr-ucnt! (inc (jr-ucnt)))
+    ($if (= (jr-ucnt) 4) (call $jr-u-done) 0)))
+
+(func $jr-surbs (param $b i32) (result i32)
+  ($if (= (local.get $b) 92)
+       (jr-do! (jr-st! (i32.const 10)) (i32.const 0))
+       (call $jr-fail (i32.const 4))))
+
+(func $jr-suru (param $b i32) (result i32)
+  ($if (= (local.get $b) 117)
+       (jr-do! (jr-u! (i32.const 0)) (jr-ucnt! (i32.const 0)) (jr-st! (i32.const 8)) (i32.const 0))
+       (call $jr-fail (i32.const 4))))
+
+;; ---------------------------------------------------------- numbers
+
+(func $jr-num-end (param $back i32) (result i32)
+  (when (local.get $back)
+    (jr-in! (dec (jr-in))))
+  (when (jr-neg)
+    (jr-int! (- 0 (jr-int))))
+  (when (> (- (jr-tok-len) (jr-neg)) 9)
+    (jr-int?! (i32.const 0)))
+  (jr-st! (i32.const 2))
+  (ev-num))
+
+(func $jr-nsign (param $b i32) (result i32)
+  (cond (= (local.get $b) 48)
+          (jr-do! (jr-st! (i32.const 12)) (call $jr-put (local.get $b)))
+        (call $jr-digit? (local.get $b))
+          (jr-do! (jr-st! (i32.const 13))
+                  (jr-int! (- (local.get $b) 48))
+                  (call $jr-put (local.get $b)))
+        :else (call $jr-fail (i32.const 6))))
+
+(func $jr-nzero (param $b i32) (result i32)
+  (cond (= (local.get $b) 46)
+          (jr-do! (jr-int?! (i32.const 0)) (jr-st! (i32.const 14)) (call $jr-put (local.get $b)))
+        (or (= (local.get $b) 101) (= (local.get $b) 69))
+          (jr-do! (jr-int?! (i32.const 0)) (jr-st! (i32.const 16)) (call $jr-put (local.get $b)))
+        (call $jr-delim? (local.get $b)) (call $jr-num-end (i32.const 1))
+        :else (call $jr-fail (i32.const 6))))
+
+(func $jr-nint (param $b i32) (result i32)
+  (cond (call $jr-digit? (local.get $b))
+          (jr-do! (jr-int! (+ (* (jr-int) 10) (- (local.get $b) 48)))
+                  (call $jr-put (local.get $b)))
+        (= (local.get $b) 46)
+          (jr-do! (jr-int?! (i32.const 0)) (jr-st! (i32.const 14)) (call $jr-put (local.get $b)))
+        (or (= (local.get $b) 101) (= (local.get $b) 69))
+          (jr-do! (jr-int?! (i32.const 0)) (jr-st! (i32.const 16)) (call $jr-put (local.get $b)))
+        (call $jr-delim? (local.get $b)) (call $jr-num-end (i32.const 1))
+        :else (call $jr-fail (i32.const 6))))
+
+(func $jr-ndot (param $b i32) (result i32)
+  ($if (call $jr-digit? (local.get $b))
+       (jr-do! (jr-st! (i32.const 15)) (call $jr-put (local.get $b)))
+       (call $jr-fail (i32.const 6))))
+
+(func $jr-nfrac (param $b i32) (result i32)
+  (cond (call $jr-digit? (local.get $b)) (call $jr-put (local.get $b))
+        (or (= (local.get $b) 101) (= (local.get $b) 69))
+          (jr-do! (jr-st! (i32.const 16)) (call $jr-put (local.get $b)))
+        (call $jr-delim? (local.get $b)) (call $jr-num-end (i32.const 1))
+        :else (call $jr-fail (i32.const 6))))
+
+(func $jr-ne (param $b i32) (result i32)
+  (cond (call $jr-digit? (local.get $b))
+          (jr-do! (jr-st! (i32.const 18)) (call $jr-put (local.get $b)))
+        (or (= (local.get $b) 43) (= (local.get $b) 45))
+          (jr-do! (jr-st! (i32.const 17)) (call $jr-put (local.get $b)))
+        :else (call $jr-fail (i32.const 6))))
+
+(func $jr-nesign (param $b i32) (result i32)
+  ($if (call $jr-digit? (local.get $b))
+       (jr-do! (jr-st! (i32.const 18)) (call $jr-put (local.get $b)))
+       (call $jr-fail (i32.const 6))))
+
+(func $jr-nexp (param $b i32) (result i32)
+  (cond (call $jr-digit? (local.get $b)) (call $jr-put (local.get $b))
+        (call $jr-delim? (local.get $b)) (call $jr-num-end (i32.const 1))
+        :else (call $jr-fail (i32.const 6))))
+
+;; --------------------------------------------------------- literals
+
+(func $jr-lit-step (param $b i32) (result i32)
+  ($if (= (local.get $b) (i32.load8_u (+ (jr-lit-ptr) (jr-lit-i))))
+       (jr-do!
+         (jr-lit-i! (inc (jr-lit-i)))
+         ($if (= (jr-lit-i) (jr-lit-len))
+              (jr-do! (jr-st! (i32.const 2)) (jr-lit-ev))
+              (i32.const 0)))
+       (call $jr-fail (i32.const 1))))
+
+;; ------------------------------------------------------- the wheel
+
+(func $jr-step (param $b i32) (result i32)
+  (cond (= (jr-st) 0) (call $jr-value (local.get $b))
+        (= (jr-st) 1) ($if (= (local.get $b) 93)
+                           (call $jr-close (i32.const 0) (ev-arr-close))
+                           (call $jr-value (local.get $b)))
+        (= (jr-st) 2) (call $jr-after (local.get $b))
+        (= (jr-st) 3) (call $jr-keyoc (local.get $b))
+        (= (jr-st) 4) (call $jr-key (local.get $b))
+        (= (jr-st) 5) (call $jr-colon (local.get $b))
+        (= (jr-st) 6) (call $jr-string (local.get $b))
+        (= (jr-st) 7) (call $jr-escape (local.get $b))
+        (= (jr-st) 8) (call $jr-hex4 (local.get $b))
+        (= (jr-st) 9) (call $jr-surbs (local.get $b))
+        (= (jr-st) 10) (call $jr-suru (local.get $b))
+        (= (jr-st) 11) (call $jr-nsign (local.get $b))
+        (= (jr-st) 12) (call $jr-nzero (local.get $b))
+        (= (jr-st) 13) (call $jr-nint (local.get $b))
+        (= (jr-st) 14) (call $jr-ndot (local.get $b))
+        (= (jr-st) 15) (call $jr-nfrac (local.get $b))
+        (= (jr-st) 16) (call $jr-ne (local.get $b))
+        (= (jr-st) 17) (call $jr-nesign (local.get $b))
+        (= (jr-st) 18) (call $jr-nexp (local.get $b))
+        :else (call $jr-lit-step (local.get $b))))
+
+(func $jr-next (result i32)
+  (when (= (jr-st) 20)
+    (return (ev-err)))
+  (let [$ev 0 $b 0]
+    (while (and (zero? (local.get $ev)) (< (jr-in) (jr-end)))
+      (local.set $b (i32.load8_u (jr-in)))
+      (jr-in! (inc (jr-in)))
+      (local.set $ev (call $jr-step (local.get $b))))
+    (local.get $ev)))
+
+(func $jr-eof (result i32)
+  (cond (= (jr-st) 20) (ev-err)
+        (and (= (jr-st) 2) (zero? (jr-depth))) (ev-eof)
+        (and (zero? (jr-depth))
+             (or (= (jr-st) 12) (= (jr-st) 13) (= (jr-st) 15) (= (jr-st) 18)))
+          (call $jr-num-end (i32.const 0))
+        :else (call $jr-fail (i32.const 9))))
