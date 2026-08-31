@@ -15,6 +15,16 @@ File extension: `.hma`.
 
 ## Quick start
 
+Use the expander:
+
+```sh
+npm install -g @ai-ecoverse/hot-glue
+hotglue program.hma > program.wat
+wasmtime program.wat
+```
+
+Or work on the language itself:
+
 ```sh
 npm install
 npm test                              # 19 suites, all under wasmtime
@@ -223,6 +233,42 @@ demands; they are upstream-shaped and apply with `git am`.
   component work (`scripts/make-envelope.mjs`, `test/envelope.test.ts`), a full
   Chromium for the playground and WebGPU tests (Playwright's stripped headless
   has no `navigator.gpu` — ask for the full build).
+
+## Releases
+
+Published to npm as
+[`@ai-ecoverse/hot-glue`](https://www.npmjs.com/package/@ai-ecoverse/hot-glue).
+Nobody types a version number: when `main` moves, `semantic-release` reads the
+next one off the commit log, and `.github/workflows/release.yml` runs the suite,
+publishes the tarball, tags the commit and writes the GitHub release.
+
+Which makes the subject line load-bearing.
+
+| Subject line | Bump | |
+|---|---|---|
+| `fix: …` | patch | 0.1.0 → 0.1.1 |
+| `feat: …` | minor | 0.1.0 → 0.2.0 |
+| any commit with a `BREAKING CHANGE:` footer | major | 0.1.0 → 1.0.0 |
+| anything else | none | — |
+
+Prose is still welcome. It moves to the body, under a conventional subject.
+
+No npm token is stored anywhere. The workflow asks GitHub for an OIDC token and
+npm trusts *the repository and the workflow file* rather than a secret somebody
+has to rotate; the tarball gets a provenance attestation on the way past. The
+one-time setup is on npmjs.com, under the package's **Trusted publisher**
+settings: GitHub Actions, `ai-ecoverse/hot-glue`, workflow `release.yml`.
+
+0.1.0 went out by hand, because npm has no settings page for a package that does
+not exist yet and therefore nowhere to name a trusted publisher before the first
+publish ([npm/cli#8544](https://github.com/npm/cli/issues/8544)). It is the only
+release without a provenance attestation. Everything from 0.1.1 on is the
+workflow's.
+
+The published tarball is `dist/`: the compiled stage-0 bootstrap, and the `.hma`
+sources beside it, where `(use prelude.hma)` looks for them. Everything else —
+the tests, the examples, the film, the recipes below — stays here in the
+repository.
 
 ## Where this came from
 

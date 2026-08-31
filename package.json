@@ -1,5 +1,5 @@
 {
-  "name": "hot-glue",
+  "name": "@ai-ecoverse/hot-glue",
   "version": "0.1.0",
   "type": "module",
   "description": "A macro expander for WebAssembly, written in WebAssembly, operating on WebAssembly",
@@ -18,10 +18,11 @@
   },
   "main": "dist/bootstrap.js",
   "bin": {
-    "hotglue": "./src/cli.ts"
+    "hotglue": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/*.hma dist/",
+    "prepack": "npm run build",
     "build:as": "npx tsx src/cli.ts src/as.hma",
     "build:expand": "npx tsx src/cli.ts src/expand.hma",
     "build:expand-gc": "npx tsx src/cli.ts src/expand-gc.hma",
@@ -50,9 +51,27 @@
     "binaryen": "^132.0.0",
     "kokoro-js": "^1.2.1",
     "playwright-core": "^1.62.1",
+    "semantic-release": "^25.0.9",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "binaryen": "^132.0.0"
+  },
+  "peerDependenciesMeta": {
+    "binaryen": {
+      "optional": true
+    }
+  }
 }
