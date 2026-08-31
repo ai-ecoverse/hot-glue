@@ -54,6 +54,25 @@ echo "    --version ok"
 printf '(use prelude.hma)\n(module)\n' | ./node_modules/.bin/hotglue | grep -q '(module'
 echo "    stdin (use …) resolves against the shipped sources"
 
+# -O needs the optional binaryen peer, which npm does not install for an
+# optional peer and which is therefore absent here. That makes this the one
+# place the "it is missing, here is what to do" message can be checked at all.
+# Not a pipeline: -O is meant to exit non-zero here, and pipefail would
+# read that as the check itself having failed.
+set +e
+oh_err="$(./node_modules/.bin/hotglue -O fizzbuzz.hma 2>&1 >/dev/null)"
+oh_status=$?
+set -e
+case "$oh_err" in
+  *"npm install binaryen"*) ;;
+  *) echo "    FAIL: -O did not explain the absent binaryen; it said:" >&2
+     printf '%s\n' "$oh_err" >&2
+     exit 1 ;;
+esac
+test "$oh_status" -ne 0 || { echo "    FAIL: -O exited 0 without binaryen" >&2; exit 1; }
+echo "    -O without binaryen names the peer, not the resolver's path"
+
+
 # and the whole way down, if there is a wasmtime here to prove it with
 ./node_modules/.bin/hotglue fizzbuzz.hma > fizzbuzz.wat
 if command -v wasmtime >/dev/null 2>&1; then
