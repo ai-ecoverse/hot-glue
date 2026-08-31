@@ -9,6 +9,15 @@
 # The version comes from the commit messages, not from package.json:
 # `fix:` bumps the patch, `feat:` the minor, a `BREAKING CHANGE:` footer
 # the major. A commit with no conventional prefix releases nothing.
+#
+# One local amendment, in .releaserc.json: while the major is 0, a
+# `BREAKING CHANGE:` footer bumps the minor rather than the major.
+# semantic-release does not special-case 0.x on its own — it hands the
+# version straight to semver.inc, and 0.2.1 plus a major is 1.0.0 — but
+# 0.x is exactly where an API is allowed to move, and the footer is there
+# to make a break legible in the release notes, not to cut a 1.0. Delete
+# that rule the day 1.0.0 is cut, or breaking changes will bump the minor
+# forever.
 
 name: Release
 
