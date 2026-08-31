@@ -33,18 +33,18 @@ jobs:
       pull-requests: write # and on the pull requests
       id-token: write      # mint the OIDC token npm trusts
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # semantic-release reads the whole tag history
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
 
-      # The test suite runs every example under wasmtime. Everything else it
-      # reaches for (Chromium, ffmpeg.wasm, the GPU runtime) it skips when
-      # absent, so this is the only tool the gate needs.
+      # Every rung above stage 0 is proven by running it. Everything else
+      # the suite reaches for — Chromium, ffmpeg.wasm, the GPU runtime —
+      # it skips when absent, so this is the only tool the gate needs.
       - name: Install wasmtime
         run: |
           curl https://wasmtime.dev/install.sh -sSf | bash
@@ -52,7 +52,9 @@ jobs:
 
       - run: npm ci
 
-      - run: npm test
+      # The identical script CI runs on every branch — which is what makes
+      # a green pull request mean a green release.
+      - run: bash scripts/verify.sh
 
       - name: Release
         env:

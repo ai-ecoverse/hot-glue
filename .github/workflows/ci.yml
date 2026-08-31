@@ -1,0 +1,51 @@
+# The pre-merge signal.
+#
+# This runs `scripts/verify.sh`, which is the same script the release
+# workflow runs before it publishes — not a copy of its steps. A green
+# check here therefore means the release will be green too, for every
+# reason except the ones only the registry can answer.
+
+name: CI
+
+on:
+  push:
+    branches-ignore: [main]   # main is covered by the release workflow
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    # Branches in this repository are already covered by the push event
+    # above; without this, every pull request from one would run twice.
+    # Forks have no push event here, so they are what is left to catch.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      # Every rung above stage 0 is proven by running it. Everything else
+      # the suite reaches for — Chromium, ffmpeg.wasm, the GPU runtime —
+      # it skips when absent, so this is the only tool the gate needs.
+      - name: Install wasmtime
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+
+      - run: npm ci
+
+      - run: bash scripts/verify.sh

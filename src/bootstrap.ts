@@ -84,19 +84,27 @@ export function resolveUses(
   return out;
 }
 
+// The lookup path a (use …) is resolved against: the given directories,
+// then ./src, then the toolchain's own home — which is where the .hma
+// sources sit in an installed package, so `npx hotglue` finds a prelude
+// without a checkout to find it in.
+export function lookupPath(dirs: string[] = []): (name: string) => string {
+  const home = dirname(new URL(import.meta.url).pathname);
+  const all = [...dirs, 'src', home];
+  return (name: string): string => {
+    for (const d of all) {
+      const p = join(d, name);
+      if (existsSync(p)) return readFileSync(p, 'utf8');
+    }
+    throw new Error(`use: ${name} not found (looked in ${all.join(', ')})`);
+  };
+}
+
 // Load entry files, resolving (use …) against the lookup path: the
 // entries' own directories, any extra dirs, then the toolchain's home.
 export function loadSource(paths: string[], extraDirs: string[] = []): string {
   const seen = new Set<string>();
-  const home = dirname(new URL(import.meta.url).pathname);
-  const dirs = [...paths.map((p) => dirname(p)), ...extraDirs, 'src', home];
-  const readNamed = (name: string): string => {
-    for (const d of dirs) {
-      const p = join(d, name);
-      if (existsSync(p)) return readFileSync(p, 'utf8');
-    }
-    throw new Error(`use: ${name} not found (looked in ${dirs.join(', ')})`);
-  };
+  const readNamed = lookupPath([...paths.map((p) => dirname(p)), ...extraDirs]);
   return paths.map((p) => resolveUses(readFileSync(p, 'utf8'), readNamed, seen)).join('\n');
 }
 

@@ -15,19 +15,24 @@ File extension: `.hma`.
 
 ## Quick start
 
-Use the expander:
+Use the expander without installing anything:
 
 ```sh
-npm install -g @ai-ecoverse/hot-glue
-hotglue program.hma > program.wat
+npx @ai-ecoverse/hot-glue program.hma > program.wat
 wasmtime program.wat
 ```
+
+The prelude travels with it, so `(use prelude.hma)` resolves against the sources
+shipped beside the program — there is no checkout for it to need. `--help` says
+the rest; `-O` emits optimized wasm instead of WAT, if the optional `binaryen`
+peer is installed. To keep it around, `npm install -g @ai-ecoverse/hot-glue`
+and call it `hotglue`.
 
 Or work on the language itself:
 
 ```sh
 npm install
-npm test                              # 19 suites, all under wasmtime
+npm test                              # 20 suites, all under wasmtime
 ```
 
 Expand a program to WAT with the stage-0 bootstrap and run it:
@@ -239,8 +244,16 @@ demands; they are upstream-shaped and apply with `git am`.
 Published to npm as
 [`@ai-ecoverse/hot-glue`](https://www.npmjs.com/package/@ai-ecoverse/hot-glue).
 Nobody types a version number: when `main` moves, `semantic-release` reads the
-next one off the commit log, and `.github/workflows/release.yml` runs the suite,
+next one off the commit log, and `.github/workflows/release.yml` runs the gate,
 publishes the tarball, tags the commit and writes the GitHub release.
+
+The gate is `scripts/verify.sh`, and CI runs the same script on every branch —
+the same script, not a second copy of its steps, so a green pull request means a
+green release. It builds, runs the suite, then packs the tarball, installs it
+somewhere else entirely, and uses it: `main` resolves, the bin runs without tsx,
+and a piped `(use prelude.hma)` finds the prelude with no checkout to find it in.
+That last part is what the suite cannot see, because the suite runs against
+`src/`. Run it yourself with `bash scripts/verify.sh`.
 
 Which makes the subject line load-bearing.
 
