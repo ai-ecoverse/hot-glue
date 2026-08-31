@@ -22,17 +22,42 @@ npx @ai-ecoverse/hot-glue program.hma > program.wat
 wasmtime program.wat
 ```
 
+No TypeScript ran in that. The package carries the three organs the bootstrap
+mints — `expand.wasm`, `as.wasm`, `hotglue.wasm` — and Node hosts them; stage 0
+stays in the checkout, where it belongs. Which means a binary needs no toolchain
+at all, not even a wasmtime:
+
+```sh
+npx @ai-ecoverse/hot-glue -w program.hma > program.wasm
+```
+
 The prelude travels with it, so `(use prelude.hma)` resolves against the sources
-shipped beside the program — there is no checkout for it to need. `--help` says
-the rest; `-O` emits optimized wasm instead of WAT, if the optional `binaryen`
-peer is installed. To keep it around, `npm install -g @ai-ecoverse/hot-glue`
-and call it `hotglue`.
+shipped beside the program — there is no checkout for it to need, and an entry
+file that is not a path is looked up the same way. `--help` says the rest; `-O`
+emits *optimized* wasm, if the optional `binaryen` peer is installed. To keep it
+around, `npm install -g @ai-ecoverse/hot-glue` and call it `hotglue`.
+
+The organs are files, so a program that would rather host them itself does not
+have to vendor them:
+
+```js
+import { compile, wasmPath } from '@ai-ecoverse/hot-glue';
+
+wasmPath('as');                                // …/dist/as.wasm, a WASI reactor
+compile('(use prelude.hma)\n(module)\n').bin;  // source in, binary out
+```
+
+One version pins the sources and the binaries together, which is the whole
+point of shipping them as one thing. The release gate proves the relation
+rather than asserting it: it expands `as.hma` with the shipped toolchain,
+assembles it with the shipped assembler, and requires the bytes that come out
+to be the shipped assembler.
 
 Or work on the language itself:
 
 ```sh
 npm install
-npm test                              # 20 suites, all under wasmtime
+npm test                              # 21 suites, all under wasmtime
 ```
 
 Expand a program to WAT with the stage-0 bootstrap and run it:
@@ -99,7 +124,7 @@ Every rung is the acceptance test for the one below it.
 
 | | | |
 |---|---|---|
-| **Stage 0** | `src/bootstrap.ts` | 458 lines of TypeScript: reader, expander, lowerer. The only TypeScript that matters. |
+| **Stage 0** | `src/bootstrap.ts` | 458 lines of TypeScript: reader, expander, lowerer. The only TypeScript that matters — and it is not in the package. |
 | **Stage 2** | `src/as.hma` | An assembler written in Hot Glue. WAT in on stdin, a binary module out on stdout. |
 | **Stage 3** | — | The assembler assembles its own source; the child assembles it again; the two binaries are byte-identical. |
 | **Stage 4** | `src/expand.hma` | The expander itself in wasm. `expand.wat` run on its own source prints the text it is running as. |
