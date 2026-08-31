@@ -14,7 +14,7 @@
  * assembler is as.wasm; this is a lookup path and forty lines of WASI.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export type Organ = 'expand' | 'as' | 'hotglue';
@@ -36,6 +36,11 @@ export interface Compiled {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dec = new TextDecoder();
+
+// What the driver can be handed: hotglue.hma walks the preopened
+// directories by trying fd 3 and stopping at 10, so seven is the length
+// of a lookup path — under wasmtime exactly as much as here.
+const PREOPENS = 7;
 
 /**
  * Where the three organs live. An explicit HOTGLUE_DIST wins — the
@@ -65,9 +70,19 @@ export function wasmPath(organ: Organ): string {
  * The lookup path a (use …) is resolved against: the caller's
  * directories, then ./src, then the sources shipped beside this file —
  * so the prelude is there under `npx`, with no checkout to find it in.
+ *
+ * Resolved and deduplicated, because the path is short and a repeat
+ * spends one of it. Six entry files out of one directory are one
+ * directory, not six, and the sources shipped beside this file are
+ * worth more than the sixth copy of the name they came in under.
  */
 export function lookupPath(dirs: string[] = []): string[] {
-  return [...dirs, 'src', here];
+  const path: string[] = [];
+  for (const dir of [...dirs, 'src', here]) {
+    const abs = resolve(dir);
+    if (!path.includes(abs)) path.push(abs);
+  }
+  return path;
 }
 
 const modules = new Map<Organ, WebAssembly.Module>();
@@ -116,6 +131,17 @@ interface Run extends Compiled {
 function run(source: string | Uint8Array, opts: Options): Run {
   const stdin = typeof source === 'string' ? new TextEncoder().encode(source) : source;
   const dirs = lookupPath(opts.dirs);
+  // Better than a lookup path whose tail is unreachable: the shipped
+  // sources are at the end of it, and a (use prelude.hma) that cannot
+  // see them fails a long way from the cause.
+  if (dirs.length > PREOPENS) {
+    throw new Error(
+      `the lookup path is ${dirs.length} directories and the driver can open ${PREOPENS}:
+  ${dirs.join('\n  ')}
+hotglue.wasm tries fd 3 through 9 and stops, so the rest would never be
+searched. Give fewer directories, or put those sources on one.`,
+    );
+  }
   const outs: Uint8Array[] = [];
   const errs: Uint8Array[] = [];
   const ex = reactor('expand', errs);

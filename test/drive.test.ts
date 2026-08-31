@@ -63,6 +63,50 @@ describe.skipIf(!runtime)('the driver — Node hosts the toolchain, and nothing 
     expect(bin.subarray(0, 4)).toEqual(new Uint8Array([0, 0x61, 0x73, 0x6d]));
   });
 
+  // The lookup path is seven long, because that is how many preopened
+  // directories hotglue.wasm goes looking through. Six entry files out of
+  // one directory used to spend six of them and push the shipped sources
+  // off the end — which only bites where ./src is not there to answer by
+  // accident, so these two run from somewhere that has no src at all.
+  const elsewhere = <T>(f: () => T): T => {
+    const back = process.cwd();
+    process.chdir(mkdtempSync(join(tmpdir(), 'hotglue-elsewhere-')));
+    try {
+      return f();
+    } finally {
+      process.chdir(back);
+    }
+  };
+
+  it('spends one slot on a directory, however many times it is named', () => {
+    const bin = elsewhere(
+      () =>
+        compile('(use prelude.hma)\n(module (func (export "_start")))\n', {
+          dirs: Array<string>(6).fill('examples'),
+        }).bin,
+    );
+    expect(bin.subarray(0, 4)).toEqual(new Uint8Array([0, 0x61, 0x73, 0x6d]));
+  });
+
+  it('fills the path to the brim and still reaches the shipped sources', () => {
+    // five directories, plus ./src, plus the sources beside the driver:
+    // seven, which is exactly what fd 3 through 9 can hold, and the
+    // shipped sources are the seventh
+    const bin = elsewhere(
+      () =>
+        compile('(use prelude.hma)\n(module (func (export "_start")))\n', {
+          dirs: ['examples', 'test', 'docs', 'scripts', 'web'],
+        }).bin,
+    );
+    expect(bin.subarray(0, 4)).toEqual(new Uint8Array([0, 0x61, 0x73, 0x6d]));
+  });
+
+  it('refuses a lookup path whose tail it could not search', () => {
+    expect(() =>
+      compile('(module)\n', { dirs: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] }),
+    ).toThrow(/fd 3 through 9|directories and the driver can open/);
+  });
+
   it('names the file a (use …) could not find', () => {
     expect(() => compile('(use nowhere.hma)\n(module)\n')).toThrow(/nowhere\.hma/);
   });
