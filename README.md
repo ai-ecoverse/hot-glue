@@ -244,8 +244,16 @@ demands; they are upstream-shaped and apply with `git am`.
 Published to npm as
 [`@ai-ecoverse/hot-glue`](https://www.npmjs.com/package/@ai-ecoverse/hot-glue).
 Nobody types a version number: when `main` moves, `semantic-release` reads the
-next one off the commit log, and `.github/workflows/release.yml` runs the suite,
+next one off the commit log, and `.github/workflows/release.yml` runs the gate,
 publishes the tarball, tags the commit and writes the GitHub release.
+
+The gate is `scripts/verify.sh`, and CI runs the same script on every branch —
+the same script, not a second copy of its steps, so a green pull request means a
+green release. It builds, runs the suite, then packs the tarball, installs it
+somewhere else entirely, and uses it: `main` resolves, the bin runs without tsx,
+and a piped `(use prelude.hma)` finds the prelude with no checkout to find it in.
+That last part is what the suite cannot see, because the suite runs against
+`src/`. Run it yourself with `bash scripts/verify.sh`.
 
 Which makes the subject line load-bearing.
 
