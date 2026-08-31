@@ -15,19 +15,24 @@ File extension: `.hma`.
 
 ## Quick start
 
-Use the expander:
+Use the expander without installing anything:
 
 ```sh
-npm install -g @ai-ecoverse/hot-glue
-hotglue program.hma > program.wat
+npx @ai-ecoverse/hot-glue program.hma > program.wat
 wasmtime program.wat
 ```
+
+The prelude travels with it, so `(use prelude.hma)` resolves against the sources
+shipped beside the program — there is no checkout for it to need. `--help` says
+the rest; `-O` emits optimized wasm instead of WAT, if the optional `binaryen`
+peer is installed. To keep it around, `npm install -g @ai-ecoverse/hot-glue`
+and call it `hotglue`.
 
 Or work on the language itself:
 
 ```sh
 npm install
-npm test                              # 19 suites, all under wasmtime
+npm test                              # 20 suites, all under wasmtime
 ```
 
 Expand a program to WAT with the stage-0 bootstrap and run it:
