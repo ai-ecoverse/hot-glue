@@ -37,7 +37,7 @@ jobs:
         with:
           fetch-depth: 0   # semantic-release reads the whole tag history
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
