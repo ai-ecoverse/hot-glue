@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env node
 /**
  * hotglue — expand WebAssembly macros, emit WAT.
  *
