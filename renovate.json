@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "semanticCommits": "enabled",
+  "platformAutomerge": false,
+  "packageRules": [
+    {
+      "description": "Development dependencies below a major: the gate decides. scripts/verify.sh builds, runs the suite, and installs the packed tarball somewhere else to use it, which is the whole of what a bump can break here.",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "minimumReleaseAge": "3 days",
+      "automerge": true
+    },
+    {
+      "description": "Workflow actions below a major. These move the ground the release stands on, so they wait out the same soak.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "minimumReleaseAge": "3 days",
+      "automerge": true
+    },
+    {
+      "description": "Majors are read by a person. Two of the three still open when this was written are majors that pass npm install and then break something the version number does not mention: TypeScript 7 stops resolving @types/node, and @ffmpeg/core 0.12 moves the files a skipIf tests for, so the suite goes green with the test no longer running.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true,
+    "schedule": ["before 6am on monday"]
+  }
+}
